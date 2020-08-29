@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,17 @@ package com.hazelcast.internal.cluster.impl;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.JoinConfig;
 import com.hazelcast.config.MulticastConfig;
-import com.hazelcast.instance.Node;
-import com.hazelcast.instance.OutOfMemoryErrorDispatcher;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.instance.impl.OutOfMemoryErrorDispatcher;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.nio.Address;
-import com.hazelcast.nio.BufferObjectDataInput;
-import com.hazelcast.nio.BufferObjectDataOutput;
-import com.hazelcast.nio.NodeIOService;
-import com.hazelcast.nio.Packet;
+import com.hazelcast.cluster.Address;
+import com.hazelcast.internal.cluster.AddressChecker;
+import com.hazelcast.internal.nio.BufferObjectDataInput;
+import com.hazelcast.internal.nio.BufferObjectDataOutput;
+import com.hazelcast.internal.server.tcp.TcpServerContext;
+import com.hazelcast.internal.nio.Packet;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
-import com.hazelcast.util.ByteArrayProcessor;
-import com.hazelcast.util.EmptyStatement;
+import com.hazelcast.internal.util.ByteArrayProcessor;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -44,7 +44,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static com.hazelcast.config.ConfigAccessor.getActiveMemberNetworkConfig;
+import static com.hazelcast.internal.util.EmptyStatement.ignore;
+
 public final class MulticastService implements Runnable {
+
+    /**
+     * IP address of a multicast group. If not set, configuration is read from the {@link MulticastConfig} configuration.
+     */
+    public static final String SYSTEM_PROPERTY_MULTICAST_GROUP = "hazelcast.multicast.group";
 
     private static final int SEND_OUTPUT_SIZE = 1024;
     private static final int DATAGRAM_BUFFER_SIZE = 64 * 1024;
@@ -53,7 +61,7 @@ public final class MulticastService implements Runnable {
     private static final int SHUTDOWN_TIMEOUT_SECONDS = 5;
     private static final int JOIN_SERIALIZATION_ERROR_SUPPRESSION_MILLIS = 60000;
 
-    private final List<MulticastListener> listeners = new CopyOnWriteArrayList<MulticastListener>();
+    private final List<MulticastListener> listeners = new CopyOnWriteArrayList<>();
     private final Object sendLock = new Object();
     private final CountDownLatch stopLatch = new CountDownLatch(1);
 
@@ -63,7 +71,7 @@ public final class MulticastService implements Runnable {
     private final BufferObjectDataOutput sendOutput;
     private final DatagramPacket datagramPacketSend;
     private final DatagramPacket datagramPacketReceive;
-    private final JoinMessageTrustChecker joinMessageTrustChecker;
+    private final AddressChecker joinMessageTrustChecker;
 
     private final ByteArrayProcessor inputProcessor;
     private final ByteArrayProcessor outputProcessor;
@@ -77,27 +85,27 @@ public final class MulticastService implements Runnable {
         this.node = node;
         this.multicastSocket = multicastSocket;
 
-        NodeIOService nodeIOService = new NodeIOService(node, node.nodeEngine);
-        this.inputProcessor = node.getNodeExtension().createMulticastInputProcessor(nodeIOService);
-        this.outputProcessor = node.getNodeExtension().createMulticastOutputProcessor(nodeIOService);
+        TcpServerContext context = new TcpServerContext(node, node.nodeEngine);
+        this.inputProcessor = node.getNodeExtension().createMulticastInputProcessor(context);
+        this.outputProcessor = node.getNodeExtension().createMulticastOutputProcessor(context);
 
         this.sendOutput = node.getSerializationService().createObjectDataOutput(SEND_OUTPUT_SIZE);
 
         Config config = node.getConfig();
-        MulticastConfig multicastConfig = config.getNetworkConfig().getJoin().getMulticastConfig();
+        MulticastConfig multicastConfig = getActiveMemberNetworkConfig(config).getJoin().getMulticastConfig();
         this.datagramPacketSend = new DatagramPacket(new byte[0], 0, InetAddress.getByName(multicastConfig.getMulticastGroup()),
                 multicastConfig.getMulticastPort());
         this.datagramPacketReceive = new DatagramPacket(new byte[DATAGRAM_BUFFER_SIZE], DATAGRAM_BUFFER_SIZE);
 
         Set<String> trustedInterfaces = multicastConfig.getTrustedInterfaces();
-        ILogger logger = node.getLogger(JoinMessageTrustChecker.class);
-        joinMessageTrustChecker = new JoinMessageTrustChecker(trustedInterfaces, logger);
+        ILogger logger = node.getLogger(AddressCheckerImpl.class);
+        joinMessageTrustChecker = new AddressCheckerImpl(trustedInterfaces, logger);
     }
 
     public static MulticastService createMulticastService(Address bindAddress, Node node, Config config, ILogger logger) {
-        JoinConfig join = config.getNetworkConfig().getJoin();
+        JoinConfig join = getActiveMemberNetworkConfig(config).getJoin();
         MulticastConfig multicastConfig = join.getMulticastConfig();
-        if (!multicastConfig.isEnabled()) {
+        if (!node.shouldUseMulticastJoiner(join)) {
             return null;
         }
 
@@ -121,7 +129,7 @@ public final class MulticastService implements Runnable {
                     // bind address, then we rely on Default Network Interface.
                     logger.warning("Hazelcast is bound to " + bindAddress.getHost() + " and loop-back mode is disabled in "
                             + "the configuration. This could cause multicast auto-discovery issues and render it unable to work. "
-                            + "Check you network connectivity, try to enable the loopback mode and/or "
+                            + "Check your network connectivity, try to enable the loopback mode and/or "
                             + "force -Djava.net.preferIPv4Stack=true on your JVM.");
                 }
             } catch (Exception e) {
@@ -129,7 +137,7 @@ public final class MulticastService implements Runnable {
             }
             multicastSocket.setReceiveBufferSize(SOCKET_BUFFER_SIZE);
             multicastSocket.setSendBufferSize(SOCKET_BUFFER_SIZE);
-            String multicastGroup = System.getProperty("hazelcast.multicast.group");
+            String multicastGroup = System.getProperty(SYSTEM_PROPERTY_MULTICAST_GROUP);
             if (multicastGroup == null) {
                 multicastGroup = multicastConfig.getMulticastGroup();
             }
@@ -160,7 +168,7 @@ public final class MulticastService implements Runnable {
             try {
                 multicastSocket.close();
             } catch (Throwable ignored) {
-                EmptyStatement.ignore(ignored);
+                ignore(ignored);
             }
             running = false;
             if (!stopLatch.await(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -178,7 +186,7 @@ public final class MulticastService implements Runnable {
             datagramPacketReceive.setData(new byte[0]);
             datagramPacketSend.setData(new byte[0]);
         } catch (Throwable ignored) {
-            EmptyStatement.ignore(ignored);
+            ignore(ignored);
         }
         stopLatch.countDown();
     }
@@ -190,7 +198,7 @@ public final class MulticastService implements Runnable {
             while (running) {
                 try {
                     final JoinMessage joinMessage = receive();
-                    if (joinMessage != null && joinMessageTrustChecker.isTrusted(joinMessage)) {
+                    if (joinMessage != null && joinMessageTrustChecker.isTrusted(joinMessage.getAddress())) {
                         for (MulticastListener multicastListener : listeners) {
                             try {
                                 multicastListener.onMessage(joinMessage);
@@ -282,7 +290,14 @@ public final class MulticastService implements Runnable {
                 multicastSocket.send(datagramPacketSend);
                 out.clear();
             } catch (IOException e) {
-                logger.warning("You probably have too long Hazelcast configuration!", e);
+                // usually catching EPERM errno
+                // see https://github.com/hazelcast/hazelcast/issues/7198
+                // For details about the causes look at the following discussion:
+                // https://groups.google.com/forum/#!msg/comp.protocols.tcp-ip/Qou9Sfgr77E/mVQAPaeI-VUJ
+                logger.warning("Sending multicast datagram failed. Exception message saying the operation is not permitted "
+                        + "usually means the underlying OS is not able to send packets at a given pace. "
+                        + "It can be caused by starting several hazelcast members in parallel when the members send "
+                        + "their join message nearly at the same time.", e);
             }
         }
     }

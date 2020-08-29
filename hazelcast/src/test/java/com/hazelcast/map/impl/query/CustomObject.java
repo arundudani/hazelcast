@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package com.hazelcast.map.impl.query;
 
-import com.hazelcast.util.HashUtil;
+import com.hazelcast.internal.util.HashUtil;
 
 import java.io.Serializable;
 import java.util.UUID;
@@ -55,7 +55,6 @@ public class CustomObject implements Serializable {
         }
 
         CustomObject that = (CustomObject) o;
-
         if (attribute != null ? !attribute.equals(that.attribute) : that.attribute != null) {
             return false;
         }
@@ -65,7 +64,6 @@ public class CustomObject implements Serializable {
         if (uuid != null ? !uuid.equals(that.uuid) : that.uuid != null) {
             return false;
         }
-
         return true;
     }
 

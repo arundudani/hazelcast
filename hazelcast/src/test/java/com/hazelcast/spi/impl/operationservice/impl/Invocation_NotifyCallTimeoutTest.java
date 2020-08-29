@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,28 +17,30 @@
 package com.hazelcast.spi.impl.operationservice.impl;
 
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.instance.Node;
-import com.hazelcast.spi.BlockingOperation;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationAccessor;
-import com.hazelcast.spi.WaitNotifyKey;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.util.UuidUtil;
+import com.hazelcast.spi.impl.operationservice.BlockingOperation;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationAccessor;
+import com.hazelcast.spi.impl.operationservice.WaitNotifyKey;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
-import com.hazelcast.util.UuidUtil;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import static com.hazelcast.test.Accessors.getNode;
+import static com.hazelcast.test.Accessors.getOperationService;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class Invocation_NotifyCallTimeoutTest extends HazelcastTestSupport {
 
     private OperationServiceImpl operationService;
@@ -58,7 +60,8 @@ public class Invocation_NotifyCallTimeoutTest extends HazelcastTestSupport {
         op.setPartitionId(0).setWaitTimeout(-1);
 
         Invocation invocation = new PartitionInvocation(
-                operationService.invocationContext, op, 10, MINUTES.toSeconds(2), MINUTES.toSeconds(2), false, false);
+                operationService.invocationContext, op, 10, MINUTES.toSeconds(2), MINUTES.toSeconds(2),
+                false, false);
 
         OperationAccessor.setInvocationTime(op, node.getClusterService().getClusterClock().getClusterTime());
 
@@ -75,7 +78,8 @@ public class Invocation_NotifyCallTimeoutTest extends HazelcastTestSupport {
         op.setPartitionId(0).setWaitTimeout(SECONDS.toMillis(2));
 
         Invocation invocation = new PartitionInvocation(
-                operationService.invocationContext, op, 10, MINUTES.toSeconds(2), MINUTES.toSeconds(2), false, false);
+                operationService.invocationContext, op, 10,
+                MINUTES.toSeconds(2), MINUTES.toSeconds(2), false, false);
 
         OperationAccessor.setInvocationTime(op, node.getClusterService().getClusterClock().getClusterTime());
 
@@ -94,7 +98,8 @@ public class Invocation_NotifyCallTimeoutTest extends HazelcastTestSupport {
         op.setPartitionId(0).setWaitTimeout(SECONDS.toMillis(60));
 
         Invocation invocation = new PartitionInvocation(
-                operationService.invocationContext, op, 10, MINUTES.toSeconds(2), MINUTES.toSeconds(2), false, false);
+                operationService.invocationContext, op, 10, MINUTES.toSeconds(2),
+                MINUTES.toSeconds(2), false, false);
 
         OperationAccessor.setInvocationTime(op, node.getClusterService().getClusterClock().getClusterTime());
 

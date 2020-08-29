@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,9 @@
 package com.hazelcast.spi.merge;
 
 import com.hazelcast.cardinality.impl.hyperloglog.HyperLogLog;
+import com.hazelcast.spi.impl.merge.AbstractSplitBrainMergePolicy;
+import com.hazelcast.spi.impl.merge.CardinalityEstimatorMergingEntry;
+import com.hazelcast.spi.merge.SplitBrainMergeTypes.CardinalityEstimatorMergeTypes;
 
 import static com.hazelcast.spi.impl.merge.SplitBrainDataSerializerHook.HYPER_LOG_LOG;
 
@@ -28,26 +31,25 @@ import static com.hazelcast.spi.impl.merge.SplitBrainDataSerializerHook.HYPER_LO
  *
  * @since 3.10
  */
-public class HyperLogLogMergePolicy extends AbstractSplitBrainMergePolicy {
+public class HyperLogLogMergePolicy
+        extends AbstractSplitBrainMergePolicy<HyperLogLog, CardinalityEstimatorMergeTypes, HyperLogLog> {
 
     public HyperLogLogMergePolicy() {
     }
 
     @Override
-    public <V> V merge(MergingValueHolder<V> mergingValue, MergingValueHolder<V> existingValue) {
-        if (!(mergingValue.getValue() instanceof HyperLogLog)) {
-            throw new IllegalArgumentException("Unsupported merging data");
-        }
+    public HyperLogLog merge(CardinalityEstimatorMergeTypes mergingValue,
+                                                CardinalityEstimatorMergeTypes existingValue) {
+        HyperLogLog merging = ((CardinalityEstimatorMergingEntry) mergingValue).getRawValue();
         if (existingValue == null) {
-            return mergingValue.getValue();
+            return merging;
         }
-
-        ((HyperLogLog) mergingValue.getValue()).merge((HyperLogLog) existingValue.getValue());
-        return mergingValue.getValue();
+        merging.merge(((CardinalityEstimatorMergingEntry) existingValue).getRawValue());
+        return merging;
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return HYPER_LOG_LOG;
     }
 }

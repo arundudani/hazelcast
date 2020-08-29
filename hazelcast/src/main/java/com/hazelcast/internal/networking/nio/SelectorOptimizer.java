@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,14 +27,15 @@ import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 import static java.lang.Class.forName;
 import static java.lang.System.arraycopy;
 
 /**
- * The SelectorOptimizer optimizes the Selector so less litter is being created. The Selector uses a HashSet, but this creates
- * an object for every add of a selection key. With this SelectorOptimizer a SelectionKeysSet, which contains an  an array,
- * is being used since every key is going to be inserted only once.
+ * The SelectorOptimizer optimizes the Selector so less litter is being created.
+ * The Selector uses a HashSet, but this creates an object for every add of a
+ * selection key. With this SelectorOptimizer a SelectionKeysSet, which contains
+ * an array, is being used since every key is going to be inserted only once.
  *
  * This trick comes from Netty.
  */
@@ -51,7 +52,7 @@ public final class SelectorOptimizer {
      * @return the created Selector.
      * @throws NullPointerException if logger is null.
      */
-    public static Selector newSelector(ILogger logger) {
+    static Selector newSelector(ILogger logger) {
         checkNotNull(logger, "logger");
 
         Selector selector;

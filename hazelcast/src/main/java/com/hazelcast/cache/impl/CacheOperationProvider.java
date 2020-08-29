@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,12 @@
 
 package com.hazelcast.cache.impl;
 
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationFactory;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.spi.merge.MergingEntryHolder;
+import com.hazelcast.internal.iteration.IterationPointer;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationFactory;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
+import com.hazelcast.spi.merge.SplitBrainMergeTypes.CacheMergeTypes;
 
 import javax.cache.expiry.ExpiryPolicy;
 import javax.cache.processor.EntryProcessor;
@@ -53,16 +54,30 @@ public interface CacheOperationProvider {
 
     Operation createEntryProcessorOperation(Data key, Integer completionId, EntryProcessor entryProcessor, Object... args);
 
-    Operation createKeyIteratorOperation(int lastTableIndex, int fetchSize);
+    /**
+     * Creates an operation for fetching a segment of a keys from a single
+     * partition.
+     *
+     * @see CacheProxy#iterator(int, int, boolean)
+     */
+    Operation createFetchKeysOperation(IterationPointer[] pointers, int fetchSize);
 
-    Operation createEntryIteratorOperation(int lastTableIndex, int fetchSize);
+    /**
+     * Creates an operation for fetching a segment of a entries from a single
+     * partition.
+     *
+     * @see CacheProxy#iterator(int, int, boolean)
+     */
+    Operation createFetchEntriesOperation(IterationPointer[] pointers, int fetchSize);
 
-    Operation createMergeOperation(String name, List<MergingEntryHolder<Data, Data>> mergingEntries,
-                                   SplitBrainMergePolicy policy);
+    Operation createMergeOperation(String name, List<CacheMergeTypes<Object, Object>> mergingEntries,
+                                   SplitBrainMergePolicy<Object, CacheMergeTypes<Object, Object>, Object> policy);
 
     OperationFactory createMergeOperationFactory(String name, int[] partitions,
-                                                 List<MergingEntryHolder<Data, Data>>[] mergingEntries,
-                                                 SplitBrainMergePolicy policy);
+                                                 List<CacheMergeTypes<Object, Object>>[] mergingEntries,
+                                                 SplitBrainMergePolicy<Object, CacheMergeTypes<Object, Object>, Object> policy);
+
+    Operation createSetExpiryPolicyOperation(List<Data> keys, Data expiryPolicy);
 
     OperationFactory createGetAllOperationFactory(Set<Data> keySet, ExpiryPolicy policy);
 
@@ -73,4 +88,5 @@ public interface CacheOperationProvider {
     OperationFactory createRemoveAllOperationFactory(Set<Data> keySet, Integer completionId);
 
     OperationFactory createSizeOperationFactory();
+
 }

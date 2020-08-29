@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,24 @@
 
 package com.hazelcast.scheduledexecutor.impl;
 
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.logging.ILogger;
+import com.hazelcast.map.impl.ExecutorStats;
 import com.hazelcast.scheduledexecutor.DuplicateTaskException;
+import com.hazelcast.scheduledexecutor.IScheduledExecutorService;
+import com.hazelcast.scheduledexecutor.IScheduledFuture;
 import com.hazelcast.scheduledexecutor.ScheduledTaskHandler;
 import com.hazelcast.scheduledexecutor.ScheduledTaskStatistics;
 import com.hazelcast.scheduledexecutor.StaleTaskException;
 import com.hazelcast.scheduledexecutor.impl.operations.SyncStateOperation;
-import com.hazelcast.spi.InvocationBuilder;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationService;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.spi.impl.executionservice.InternalExecutionService;
-import com.hazelcast.spi.merge.MergingValueHolder;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.executionservice.ExecutionService;
+import com.hazelcast.spi.impl.merge.ScheduledExecutorMergingEntryImpl;
+import com.hazelcast.spi.impl.operationservice.InvocationBuilder;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationService;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
+import com.hazelcast.spi.merge.SplitBrainMergeTypes.ScheduledExecutorMergeTypes;
 
 import java.util.Collection;
 import java.util.Map;
@@ -42,11 +46,11 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
+import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
+import static com.hazelcast.internal.util.ExceptionUtil.sneakyThrow;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
 import static com.hazelcast.scheduledexecutor.impl.DistributedScheduledExecutorService.SERVICE_NAME;
-import static com.hazelcast.spi.impl.merge.MergingHolders.createMergeHolder;
-import static com.hazelcast.util.ExceptionUtil.rethrow;
-import static com.hazelcast.util.ExceptionUtil.sneakyThrow;
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingEntry;
 import static java.lang.String.format;
 import static java.util.logging.Level.FINE;
 import static java.util.logging.Level.FINEST;
@@ -57,46 +61,80 @@ public class ScheduledExecutorContainer {
 
     protected final ConcurrentMap<String, ScheduledTaskDescriptor> tasks;
 
-    private final ILogger logger;
-
-    private final String name;
-
-    private final NodeEngine nodeEngine;
-
-    private final InternalExecutionService executionService;
-
+    private final boolean statisticsEnabled;
+    private final int durability;
     private final int partitionId;
 
-    private final int durability;
+    private final String name;
+    private final ILogger logger;
+    private final NodeEngine nodeEngine;
+    private final ExecutionService executionService;
+    /**
+     * Permits are acquired through two different places
+     * a. When a task is scheduled by the user-facing API
+     * ie. {@link IScheduledExecutorService#schedule(Runnable, long, TimeUnit)}
+     * whereas the permit policy is enforced, rejecting new tasks once the capacity is reached.
+     * b. When a task is promoted (ie. migration finished)
+     * whereas the permit policy is not-enforced, meaning that actual task count might be more than the configured capacity,
+     * but that is purposefully done to prevent any data-loss during node/cluster failures.
+     *
+     * Permits are released similarly through two different places
+     * a. When a task is disposed by user-facing API
+     * ie. {@link IScheduledFuture#dispose()} or {@link IScheduledExecutorService#destroy()}
+     * b. When a task is suspended (ie. migration started / roll-backed)
+     * Note: Permit releases are done, only if the task was previously active
+     * (ie. {@link ScheduledTaskDescriptor#status == {@link Status#ACTIVE}}
+     *
+     * As a result, {@link #tasks} size will be inconsistent with the number of acquired permits at times.
+     */
+    private final CapacityPermit permit;
+    private final ExecutorStats executorStats;
 
-    private final int capacity;
-
-    ScheduledExecutorContainer(String name, int partitionId, NodeEngine nodeEngine, int durability, int capacity) {
-        this(name, partitionId, nodeEngine, durability, capacity, new ConcurrentHashMap<String, ScheduledTaskDescriptor>());
+    ScheduledExecutorContainer(String name, int partitionId, NodeEngine nodeEngine, CapacityPermit permit,
+                               int durability, boolean statisticsEnabled) {
+        this(name, partitionId, nodeEngine, permit, durability, new ConcurrentHashMap<>(), statisticsEnabled);
     }
 
-    ScheduledExecutorContainer(String name, int partitionId, NodeEngine nodeEngine, int durability, int capacity,
-                               ConcurrentMap<String, ScheduledTaskDescriptor> tasks) {
+    ScheduledExecutorContainer(String name, int partitionId,
+                               NodeEngine nodeEngine,
+                               CapacityPermit permit, int durability,
+                               ConcurrentMap<String, ScheduledTaskDescriptor> tasks,
+                               boolean statisticsEnabled) {
         this.logger = nodeEngine.getLogger(getClass());
         this.name = name;
         this.nodeEngine = nodeEngine;
-        this.executionService = (InternalExecutionService) nodeEngine.getExecutionService();
+        this.executionService = nodeEngine.getExecutionService();
         this.partitionId = partitionId;
         this.durability = durability;
-        this.capacity = capacity;
+        this.permit = permit;
         this.tasks = tasks;
+        this.statisticsEnabled = statisticsEnabled;
+        DistributedScheduledExecutorService service = nodeEngine.getService(SERVICE_NAME);
+        this.executorStats = service.getExecutorStats();
+    }
+
+    public ExecutorStats getExecutorStats() {
+        return executorStats;
+    }
+
+    public boolean isStatisticsEnabled() {
+        return statisticsEnabled;
     }
 
     public ScheduledFuture schedule(TaskDefinition definition) {
         checkNotDuplicateTask(definition.getName());
-        checkNotAtCapacity();
+        acquirePermit(false);
         return createContextAndSchedule(definition);
     }
 
     public boolean cancel(String taskName) {
         checkNotStaleTask(taskName);
         log(FINEST, taskName, "Canceling");
-        return tasks.get(taskName).cancel(true);
+        boolean cancelled = tasks.get(taskName).cancel(true);
+        if (statisticsEnabled && cancelled) {
+            executorStats.cancelExecution(name);
+        }
+        return cancelled;
     }
 
     public boolean has(String taskName) {
@@ -133,11 +171,11 @@ public class ScheduledExecutorContainer {
     public void destroy() {
         log(FINEST, "Destroying container...");
 
-        for (ScheduledTaskDescriptor descriptor : tasks.values()) {
+        for (String task : tasks.keySet()) {
             try {
-                descriptor.cancel(true);
+                dispose(task);
             } catch (Exception ex) {
-                log(WARNING, descriptor.getDefinition().getName(), "Error while destroying", ex);
+                log(WARNING, task, "Error while destroying", ex);
             }
         }
     }
@@ -146,10 +184,12 @@ public class ScheduledExecutorContainer {
         checkNotStaleTask(taskName);
         log(FINEST, taskName, "Disposing");
 
-        ScheduledTaskDescriptor descriptor = tasks.get(taskName);
-        descriptor.cancel(true);
+        ScheduledTaskDescriptor descriptor = tasks.remove(taskName);
+        if (descriptor.isActive()) {
+            releasePermit();
+        }
 
-        tasks.remove(taskName);
+        descriptor.cancel(true);
     }
 
     public void enqueueSuspended(TaskDefinition definition) {
@@ -161,7 +201,8 @@ public class ScheduledExecutorContainer {
             log(FINEST, "Enqueuing suspended, i.e., backup: " + descriptor.getDefinition());
         }
 
-        if (force || !tasks.containsKey(descriptor.getDefinition().getName())) {
+        boolean keyExists = tasks.containsKey(descriptor.getDefinition().getName());
+        if (force || !keyExists) {
             tasks.put(descriptor.getDefinition().getName(), descriptor);
         }
     }
@@ -193,6 +234,10 @@ public class ScheduledExecutorContainer {
         } else {
             descriptor.setTaskResult(resolution);
         }
+
+        if (descriptor.getDefinition().isAutoDisposable() && descriptor.isDone()) {
+            dispose(taskName);
+        }
     }
 
     public boolean shouldParkGetResult(String taskName) {
@@ -219,14 +264,25 @@ public class ScheduledExecutorContainer {
         return ScheduledTaskHandlerImpl.of(partitionId, getName(), taskName);
     }
 
+    /**
+     * Attempts to promote and schedule all suspended tasks on this partition.
+     * Exceptions throw during rescheduling will be rethrown and will prevent
+     * further suspended tasks from being scheduled.
+     */
     public void promoteSuspended() {
         for (ScheduledTaskDescriptor descriptor : tasks.values()) {
             try {
                 log(FINEST, descriptor.getDefinition().getName(), "Attempting promotion");
-                if (descriptor.shouldSchedule()) {
+                boolean wasActive = descriptor.isActive();
+                if (descriptor.canBeScheduled()) {
                     doSchedule(descriptor);
                 }
 
+                if (!wasActive) {
+                    acquirePermit(true);
+                }
+
+                descriptor.setActive();
             } catch (Exception e) {
                 throw rethrow(e);
             }
@@ -234,49 +290,62 @@ public class ScheduledExecutorContainer {
     }
 
     /**
-     * Merges the given {@link MergingValueHolder} via the given {@link SplitBrainMergePolicy}.
+     * Merges the given {@link ScheduledExecutorMergeTypes} via the given {@link SplitBrainMergePolicy}.
      *
-     * @param mergingValue the {@link MergingValueHolder} instance to merge
+     * @param mergingEntry the {@link ScheduledExecutorMergeTypes} instance to merge
      * @param mergePolicy  the {@link SplitBrainMergePolicy} instance to apply
      * @return the used {@link ScheduledTaskDescriptor} if merge is applied, otherwise {@code null}
      */
-    public ScheduledTaskDescriptor merge(MergingValueHolder<ScheduledTaskDescriptor> mergingValue,
-                                         SplitBrainMergePolicy mergePolicy) {
+    public ScheduledTaskDescriptor merge(
+            ScheduledExecutorMergeTypes mergingEntry,
+            SplitBrainMergePolicy<ScheduledTaskDescriptor, ScheduledExecutorMergeTypes, ScheduledTaskDescriptor> mergePolicy) {
         SerializationService serializationService = nodeEngine.getSerializationService();
-        serializationService.getManagedContext().initialize(mergePolicy);
-        mergingValue.setSerializationService(serializationService);
+        mergingEntry = (ScheduledExecutorMergeTypes) serializationService.getManagedContext().initialize(mergingEntry);
+        mergePolicy = (SplitBrainMergePolicy<ScheduledTaskDescriptor, ScheduledExecutorMergeTypes, ScheduledTaskDescriptor>)
+                serializationService.getManagedContext().initialize(mergePolicy);
 
-        // try to find an existing item with the same value
-        ScheduledTaskDescriptor match = null;
-        for (ScheduledTaskDescriptor item : tasks.values()) {
-            if (mergingValue.getValue().equals(item)) {
-                match = item;
+        // try to find an existing task with the same definition
+        ScheduledTaskDescriptor mergingTask = ((ScheduledExecutorMergingEntryImpl) mergingEntry).getRawValue();
+        ScheduledTaskDescriptor existingTask = null;
+        for (ScheduledTaskDescriptor task : tasks.values()) {
+            if (mergingTask.equals(task)) {
+                existingTask = task;
                 break;
             }
         }
-
-        ScheduledTaskDescriptor merged;
-        if (match == null) {
-            // Missing incoming entry
-            merged = mergePolicy.merge(mergingValue, null);
-            if (merged != null) {
-                enqueueSuspended(merged, false);
+        if (existingTask == null) {
+            ScheduledTaskDescriptor newTask = mergePolicy.merge(mergingEntry, null);
+            if (newTask != null) {
+                enqueueSuspended(newTask, false);
+                return newTask;
             }
         } else {
-            // Found a match -> real merge
-            MergingValueHolder<ScheduledTaskDescriptor> existingValue = createMergeHolder(match);
-            existingValue.setSerializationService(serializationService);
-            merged = mergePolicy.merge(mergingValue, existingValue);
-            if (merged != null && !merged.equals(match)) {
-                // Cancel matched one, before replacing it
-                match.cancel(true);
-                enqueueSuspended(merged, true);
-            } else {
-                merged = null;
+            ScheduledExecutorMergeTypes existingEntry = createMergingEntry(serializationService, existingTask);
+            ScheduledTaskDescriptor newTask = mergePolicy.merge(mergingEntry, existingEntry);
+            // we are using == instead of equals() for the task comparison,
+            // since the descriptor may have the same fields for merging and existing entry,
+            // but we still want to be able to choose which one is merged (e.g. PassThroughMergePolicy)
+            if (newTask != null && newTask != existingTask) {
+                // cancel the existing task, before replacing it
+                existingTask.cancel(true);
+                enqueueSuspended(newTask, true);
+                return newTask;
             }
         }
+        // the merging task was already suspended on the original node, so we don't have to cancel it here
+        return null;
+    }
 
-        return merged;
+    private void releasePermit() {
+        permit.release();
+    }
+
+    private void acquirePermit(boolean quietly) {
+        if (quietly) {
+            permit.acquireQuietly();
+        } else {
+            permit.acquire();
+        }
     }
 
     ScheduledFuture createContextAndSchedule(TaskDefinition definition) {
@@ -296,33 +365,49 @@ public class ScheduledExecutorContainer {
         return descriptor.getScheduledFuture();
     }
 
-    Map<String, ScheduledTaskDescriptor> prepareForReplication(boolean migrationMode) {
-
+    /**
+     * Returns all task descriptors on this container, mapped by task name.
+     *
+     * @return a map of all tasks on this container
+     */
+    Map<String, ScheduledTaskDescriptor> prepareForReplication() {
         Map<String, ScheduledTaskDescriptor> replicas = createHashMap(tasks.size());
-
         for (ScheduledTaskDescriptor descriptor : tasks.values()) {
             try {
-                ScheduledTaskDescriptor replica = new ScheduledTaskDescriptor(descriptor.getDefinition(), descriptor.getState(),
-                        descriptor.getStatsSnapshot(), descriptor.getTaskResult());
+                ScheduledTaskDescriptor replica = new ScheduledTaskDescriptor(descriptor.getDefinition(),
+                        descriptor.getState(),
+                        descriptor.getStatsSnapshot(),
+                        descriptor.getTaskResult());
                 replicas.put(descriptor.getDefinition().getName(), replica);
             } catch (Exception ex) {
                 sneakyThrow(ex);
-            } finally {
-                if (migrationMode) {
-                    // Best effort to cancel & interrupt the task.
-                    // In the case of Runnable the DelegateAndSkipOnConcurrentExecutionDecorator is not exposing access
-                    // to the Executor's Future, hence, we have no access on the runner thread to interrupt. In this case
-                    // the line below is only cancelling future runs.
-                    try {
-                        descriptor.suspend();
-                    } catch (Exception ex) {
-                        throw rethrow(ex);
-                    }
-                }
             }
         }
-
         return replicas;
+    }
+
+    /**
+     * Attempts to cancel and interrupt all tasks on this container. Exceptions
+     * thrown during task cancellation will be rethrown and prevent further
+     * tasks from being cancelled.
+     */
+    void suspendTasks() {
+        for (ScheduledTaskDescriptor descriptor : tasks.values()) {
+            // Best effort to cancel & interrupt the task.
+            // In the case of Runnable the DelegateAndSkipOnConcurrentExecutionDecorator is not exposing access
+            // to the Executor's Future, hence, we have no access on the runner thread to interrupt. In this case
+            // the line below is only cancelling future runs.
+            try {
+                if (descriptor.suspend()) {
+                    releasePermit();
+                }
+                if (logger.isFinestEnabled()) {
+                    log(FINEST, descriptor.getDefinition().getName(), "Suspended");
+                }
+            } catch (Exception ex) {
+                throw rethrow(ex);
+            }
+        }
     }
 
     void checkNotDuplicateTask(String taskName) {
@@ -332,16 +417,9 @@ public class ScheduledExecutorContainer {
         }
     }
 
-    void checkNotAtCapacity() {
-        if (capacity != 0 && tasks.size() >= capacity) {
-            throw new RejectedExecutionException(
-                    "Maximum capacity (" + capacity + ") of tasks reached, " + "for scheduled executor (" + name + ")");
-        }
-    }
-
     /**
-     * State is published after every run. When replicas get promoted, they start of, with the latest state see {@link
-     * TaskRunner#initOnce()}
+     * State is published after every run.
+     * When replicas get promoted, they start with the latest state.
      */
     void publishTaskState(String taskName, Map stateSnapshot, ScheduledTaskStatisticsImpl statsSnapshot,
                           ScheduledTaskResult result) {
@@ -350,7 +428,9 @@ public class ScheduledExecutorContainer {
         }
 
         Operation op = new SyncStateOperation(getName(), taskName, stateSnapshot, statsSnapshot, result);
-        createInvocationBuilder(op).invoke().join();
+        createInvocationBuilder(op)
+                .invoke()
+                .joinInternal();
     }
 
     protected InvocationBuilder createInvocationBuilder(Operation op) {
@@ -382,29 +462,36 @@ public class ScheduledExecutorContainer {
         assert descriptor.getScheduledFuture() == null;
         TaskDefinition definition = descriptor.getDefinition();
 
-        if (logger.isFinestEnabled()) {
-            log(FINEST, definition.getName(), "Scheduled");
-        }
-
         ScheduledFuture future;
         TaskRunner<V> runner;
-        switch (definition.getType()) {
-            case SINGLE_RUN:
-                runner = new TaskRunner<V>(this, descriptor);
-                future = new DelegatingScheduledFutureStripper<V>(executionService
-                        .scheduleDurable(name, (Callable) runner, definition.getInitialDelay(), definition.getUnit()));
-                break;
-            case AT_FIXED_RATE:
-                runner = new TaskRunner<V>(this, descriptor);
-                future = executionService
-                        .scheduleDurableWithRepetition(name, runner, definition.getInitialDelay(), definition.getPeriod(),
-                                definition.getUnit());
-                break;
-            default:
-                throw new IllegalArgumentException();
+        try {
+            switch (definition.getType()) {
+                case SINGLE_RUN:
+                    runner = new TaskRunner<>(this, descriptor);
+                    future = new DelegatingScheduledFutureStripper<V>(executionService
+                            .scheduleDurable(name, (Callable) runner, definition.getInitialDelay(), definition.getUnit()));
+                    break;
+                case AT_FIXED_RATE:
+                    runner = new TaskRunner<>(this, descriptor);
+                    future = executionService
+                            .scheduleDurableWithRepetition(name, runner, definition.getInitialDelay(), definition.getPeriod(),
+                                    definition.getUnit());
+                    break;
+                default:
+                    throw new IllegalArgumentException();
+            }
+        } catch (RejectedExecutionException e) {
+            if (statisticsEnabled) {
+                getExecutorStats().rejectExecution(name);
+            }
+            throw e;
         }
 
         descriptor.setScheduledFuture(future);
+
+        if (logger.isFinestEnabled()) {
+            log(FINEST, definition.getName(), "Scheduled");
+        }
     }
 
     private void checkNotStaleTask(String taskName) {
@@ -412,5 +499,4 @@ public class ScheduledExecutorContainer {
             throw new StaleTaskException("Task with name " + taskName + " not found. ");
         }
     }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,20 +18,22 @@ package com.hazelcast.config;
 
 import com.hazelcast.durableexecutor.DurableExecutorService;
 import com.hazelcast.internal.cluster.Versions;
+import com.hazelcast.internal.config.ConfigDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 import com.hazelcast.nio.serialization.impl.Versioned;
 
 import java.io.IOException;
+import java.util.Objects;
 
-import static com.hazelcast.util.Preconditions.checkNotNegative;
-import static com.hazelcast.util.Preconditions.checkPositive;
+import static com.hazelcast.internal.util.Preconditions.checkNotNegative;
+import static com.hazelcast.internal.util.Preconditions.checkPositive;
 
 /**
  * Contains the configuration for an {@link DurableExecutorService}.
  */
-public class DurableExecutorConfig implements IdentifiedDataSerializable, Versioned {
+public class DurableExecutorConfig implements IdentifiedDataSerializable, NamedConfig, Versioned {
 
     /**
      * The number of executor threads per Member for the Executor based on this configuration.
@@ -56,9 +58,9 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
 
     private int capacity = DEFAULT_RING_BUFFER_CAPACITY;
 
-    private String quorumName;
+    private String splitBrainProtectionName;
 
-    private transient DurableExecutorConfigReadOnly readOnly;
+    private boolean statisticsEnabled = true;
 
     public DurableExecutorConfig() {
     }
@@ -67,20 +69,23 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
         this.name = name;
     }
 
-    public DurableExecutorConfig(String name, int poolSize, int durability, int capacity) {
-        this(name, poolSize, durability, capacity, null);
+    public DurableExecutorConfig(String name, int poolSize, int durability, int capacity, boolean statisticsEnabled) {
+        this(name, poolSize, durability, capacity, null, statisticsEnabled);
     }
 
-    public DurableExecutorConfig(String name, int poolSize, int durability, int capacity, String quorumName) {
+    public DurableExecutorConfig(String name, int poolSize, int durability, int capacity,
+                                 String splitBrainProtectionName, boolean statisticsEnabled) {
         this.name = name;
         this.poolSize = poolSize;
         this.durability = durability;
         this.capacity = capacity;
-        this.quorumName = quorumName;
+        this.splitBrainProtectionName = splitBrainProtectionName;
+        this.statisticsEnabled = statisticsEnabled;
     }
 
     public DurableExecutorConfig(DurableExecutorConfig config) {
-        this(config.getName(), config.getPoolSize(), config.getDurability(), config.getCapacity(), config.getQuorumName());
+        this(config.getName(), config.getPoolSize(), config.getDurability(), config.getCapacity(),
+                config.getSplitBrainProtectionName(), config.isStatisticsEnabled());
     }
 
     /**
@@ -119,7 +124,7 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
      * @return this executor config instance
      */
     public DurableExecutorConfig setPoolSize(int poolSize) {
-        this.poolSize = checkPositive(poolSize, "Pool size should be greater than 0");
+        this.poolSize = checkPositive("poolSize", poolSize);
         return this;
     }
 
@@ -160,30 +165,49 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
      * @return this executor config instance
      */
     public DurableExecutorConfig setCapacity(int capacity) {
-        this.capacity = checkPositive(capacity, "Capacity should be greater than 0");
+        this.capacity = checkPositive("capacity", capacity);
         return this;
     }
 
     /**
-     * Returns the quorum name for operations.
+     * Returns the split brain protection name for operations.
      *
-     * @return the quorum name
+     * @return the split brain protection name
      */
-    public String getQuorumName() {
-        return quorumName;
+    public String getSplitBrainProtectionName() {
+        return splitBrainProtectionName;
     }
 
     /**
-     * Sets the quorum name for operations.
+     * Sets the split brain protection name for operations.
      *
-     * @param quorumName the quorum name
+     * @param splitBrainProtectionName the split brain protection name
      * @return the updated configuration
      */
-    public DurableExecutorConfig setQuorumName(String quorumName) {
-        this.quorumName = quorumName;
+    public DurableExecutorConfig setSplitBrainProtectionName(String splitBrainProtectionName) {
+        this.splitBrainProtectionName = splitBrainProtectionName;
         return this;
     }
 
+    /**
+     * @return {@code true} if statistics gathering is enabled
+     * on the executor task (default), {@code false} otherwise
+     */
+    public boolean isStatisticsEnabled() {
+        return statisticsEnabled;
+    }
+
+    /**
+     * Enables or disables statistics gathering on the executor task.
+     *
+     * @param statisticsEnabled {@code true} if statistics
+     *                          gathering is enabled on the executor task, {@code
+     *                          false} otherwise @return this executor config instance
+     */
+    public DurableExecutorConfig setStatisticsEnabled(boolean statisticsEnabled) {
+        this.statisticsEnabled = statisticsEnabled;
+        return this;
+    }
 
     @Override
     public String toString() {
@@ -191,15 +215,9 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
                 + "name='" + name + '\''
                 + ", poolSize=" + poolSize
                 + ", capacity=" + capacity
-                + ", quorumName=" + quorumName
+                + ", statisticsEnabled=" + statisticsEnabled
+                + ", splitBrainProtectionName=" + splitBrainProtectionName
                 + '}';
-    }
-
-    DurableExecutorConfigReadOnly getAsReadOnly() {
-        if (readOnly == null) {
-            readOnly = new DurableExecutorConfigReadOnly(this);
-        }
-        return readOnly;
     }
 
     @Override
@@ -208,7 +226,7 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ConfigDataSerializerHook.DURABLE_EXECUTOR_CONFIG;
     }
 
@@ -218,9 +236,11 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
         out.writeInt(poolSize);
         out.writeInt(durability);
         out.writeInt(capacity);
-        // RU_COMPAT_3_9
-        if (out.getVersion().isGreaterOrEqual(Versions.V3_10)) {
-            out.writeUTF(quorumName);
+        out.writeUTF(splitBrainProtectionName);
+
+        // RU_COMPAT_4_0
+        if (out.getVersion().isGreaterOrEqual(Versions.V4_1)) {
+            out.writeBoolean(statisticsEnabled);
         }
     }
 
@@ -230,13 +250,16 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
         poolSize = in.readInt();
         durability = in.readInt();
         capacity = in.readInt();
-        // RU_COMPAT_3_9
-        if (in.getVersion().isGreaterOrEqual(Versions.V3_10)) {
-            quorumName = in.readUTF();
+        splitBrainProtectionName = in.readUTF();
+
+        // RU_COMPAT_4_0
+        if (in.getVersion().isGreaterOrEqual(Versions.V4_1)) {
+            statisticsEnabled = in.readBoolean();
         }
     }
 
     @Override
+    @SuppressWarnings("checkstyle:npathcomplexity")
     public final boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -255,7 +278,10 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
         if (capacity != that.capacity) {
             return false;
         }
-        if (quorumName != null ? !quorumName.equals(that.quorumName) : that.quorumName != null) {
+        if (statisticsEnabled != that.statisticsEnabled) {
+            return false;
+        }
+        if (!Objects.equals(splitBrainProtectionName, that.splitBrainProtectionName)) {
             return false;
         }
         return name.equals(that.name);
@@ -267,40 +293,8 @@ public class DurableExecutorConfig implements IdentifiedDataSerializable, Versio
         result = 31 * result + poolSize;
         result = 31 * result + durability;
         result = 31 * result + capacity;
-        result = 31 * result + (quorumName != null ? quorumName.hashCode() : 0);
+        result = 31 * result + (statisticsEnabled ? 1 : 0);
+        result = 31 * result + (splitBrainProtectionName != null ? splitBrainProtectionName.hashCode() : 0);
         return result;
-    }
-
-    // not private for testing
-    static class DurableExecutorConfigReadOnly extends DurableExecutorConfig {
-
-        DurableExecutorConfigReadOnly(DurableExecutorConfig config) {
-            super(config);
-        }
-
-        @Override
-        public DurableExecutorConfig setName(String name) {
-            throw new UnsupportedOperationException("This config is read-only durable executor: " + getName());
-        }
-
-        @Override
-        public DurableExecutorConfig setPoolSize(int poolSize) {
-            throw new UnsupportedOperationException("This config is read-only durable executor: " + getName());
-        }
-
-        @Override
-        public DurableExecutorConfig setCapacity(int capacity) {
-            throw new UnsupportedOperationException("This config is read-only durable executor: " + getName());
-        }
-
-        @Override
-        public DurableExecutorConfig setDurability(int durability) {
-            throw new UnsupportedOperationException("This config is read-only durable executor: " + getName());
-        }
-
-        @Override
-        public DurableExecutorConfig setQuorumName(String quorumName) {
-            throw new UnsupportedOperationException("This config is read-only durable executor: " + getName());
-        }
     }
 }

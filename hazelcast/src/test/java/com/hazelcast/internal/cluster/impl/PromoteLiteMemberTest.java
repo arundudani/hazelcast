@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,26 +16,27 @@
 
 package com.hazelcast.internal.cluster.impl;
 
+import com.hazelcast.cluster.Address;
+import com.hazelcast.cluster.Cluster;
 import com.hazelcast.cluster.ClusterState;
+import com.hazelcast.cluster.Member;
 import com.hazelcast.config.Config;
-import com.hazelcast.core.Cluster;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.Member;
 import com.hazelcast.core.MemberLeftException;
 import com.hazelcast.internal.cluster.impl.operations.PromoteLiteMemberOp;
 import com.hazelcast.internal.partition.InternalPartition;
-import com.hazelcast.nio.Address;
-import com.hazelcast.spi.InternalCompletableFuture;
+import com.hazelcast.internal.util.RootCauseMatcher;
+import com.hazelcast.internal.util.UuidUtil;
+import com.hazelcast.spi.impl.InternalCompletableFuture;
 import com.hazelcast.spi.impl.operationservice.impl.Invocation;
 import com.hazelcast.spi.impl.operationservice.impl.InvocationRegistry;
 import com.hazelcast.spi.impl.operationservice.impl.OperationServiceImpl;
-import com.hazelcast.test.AssertTask;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
-import com.hazelcast.util.UuidUtil;
+import com.hazelcast.test.annotation.SerializationSamplesExcluded;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -43,7 +44,7 @@ import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
 import java.util.Map;
-import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -53,19 +54,23 @@ import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.F_ID
 import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.HEARTBEAT;
 import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.MEMBER_INFO_UPDATE;
 import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.PROMOTE_LITE_MEMBER;
+import static com.hazelcast.test.Accessors.getAddress;
+import static com.hazelcast.test.Accessors.getNode;
+import static com.hazelcast.test.Accessors.getOperationService;
+import static com.hazelcast.test.Accessors.getPartitionService;
 import static com.hazelcast.test.PacketFiltersUtil.dropOperationsBetween;
 import static com.hazelcast.test.PacketFiltersUtil.dropOperationsFrom;
+import static com.hazelcast.test.PacketFiltersUtil.rejectOperationsBetween;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
 import static org.hamcrest.Matchers.greaterThan;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class, SerializationSamplesExcluded.class})
 public class PromoteLiteMemberTest extends HazelcastTestSupport {
 
     @Rule
@@ -108,7 +113,7 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory();
 
         HazelcastInstance hz1 = factory.newHazelcastInstance(new Config());
-        HazelcastInstance hz2 = factory.newHazelcastInstance(new Config());
+        factory.newHazelcastInstance(new Config());
 
         exception.expect(IllegalStateException.class);
         hz1.getCluster().promoteLocalLiteMember();
@@ -118,7 +123,7 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
     public void normalMember_promotion_shouldFail_onNonMaster() {
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory();
 
-        HazelcastInstance hz1 = factory.newHazelcastInstance(new Config());
+        factory.newHazelcastInstance(new Config());
         HazelcastInstance hz2 = factory.newHazelcastInstance(new Config());
         HazelcastInstance hz3 = factory.newHazelcastInstance(new Config());
 
@@ -127,7 +132,8 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
 
         InternalCompletableFuture<MembersView> future =
                 getOperationService(hz2).invokeOnTarget(ClusterServiceImpl.SERVICE_NAME, op, getAddress(hz3));
-        exception.expect(IllegalStateException.class);
+        exception.expect(CompletionException.class);
+        exception.expect(new RootCauseMatcher(IllegalStateException.class));
         future.join();
     }
 
@@ -154,11 +160,12 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
         HazelcastInstance hz2 = factory.newHazelcastInstance(new Config());
 
         PromoteLiteMemberOp op = new PromoteLiteMemberOp();
-        op.setCallerUuid(UuidUtil.newUnsecureUuidString());
+        op.setCallerUuid(UuidUtil.newUnsecureUUID());
 
         InternalCompletableFuture<MembersView> future =
                 getOperationService(hz2).invokeOnTarget(ClusterServiceImpl.SERVICE_NAME, op, getAddress(hz1));
-        exception.expect(IllegalStateException.class);
+        exception.expect(CompletionException.class);
+        exception.expect(new RootCauseMatcher(IllegalStateException.class));
         future.join();
     }
 
@@ -238,7 +245,7 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
     }
 
     @Test
-    public void promotion_shouldFail_whenMastershipClaimInProgress_duringPromotion() throws Exception {
+    public void promotion_shouldFail_whenMastershipClaimInProgress_duringPromotion() {
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory();
 
         HazelcastInstance hz1 = factory.newHazelcastInstance(new Config());
@@ -264,17 +271,14 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
         assertClusterSizeEventually(3, hz2);
 
         dropOperationsBetween(hz3, hz1, F_ID, singletonList(PROMOTE_LITE_MEMBER));
-        final Cluster cluster = hz3.getCluster();
-        Future<Exception> future = spawn(new Callable<Exception>() {
-            @Override
-            public Exception call() throws Exception {
-                try {
-                    cluster.promoteLocalLiteMember();
-                } catch (Exception e) {
-                    return e;
-                }
-                return null;
+        Cluster cluster = hz3.getCluster();
+        Future<Exception> future = spawn(() -> {
+            try {
+                cluster.promoteLocalLiteMember();
+            } catch (Exception e) {
+                return e;
             }
+            return null;
         });
         assertPromotionInvocationStarted(hz3);
 
@@ -291,22 +295,17 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory();
 
         HazelcastInstance hz1 = factory.newHazelcastInstance(new Config());
-        final HazelcastInstance hz2 = factory.newHazelcastInstance(new Config());
-        final HazelcastInstance hz3 = factory.newHazelcastInstance(new Config().setLiteMember(true));
+        HazelcastInstance hz2 = factory.newHazelcastInstance(new Config());
+        HazelcastInstance hz3 = factory.newHazelcastInstance(new Config().setLiteMember(true));
 
         assertClusterSizeEventually(3, hz2);
 
-        dropOperationsBetween(hz3, hz1, F_ID, asList(PROMOTE_LITE_MEMBER, EXPLICIT_SUSPICION));
+        rejectOperationsBetween(hz3, hz1, F_ID, asList(PROMOTE_LITE_MEMBER, EXPLICIT_SUSPICION));
         dropOperationsFrom(hz2, F_ID, asList(MEMBER_INFO_UPDATE, EXPLICIT_SUSPICION));
         dropOperationsFrom(hz1, F_ID, singletonList(HEARTBEAT));
 
-        final Cluster cluster = hz3.getCluster();
-        Future future = spawn(new Runnable() {
-            @Override
-            public void run() {
-                cluster.promoteLocalLiteMember();
-            }
-        });
+        Cluster cluster = hz3.getCluster();
+        Future future = spawn(cluster::promoteLocalLiteMember);
 
         assertPromotionInvocationStarted(hz3);
 
@@ -324,79 +323,22 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
         }
     }
 
-    @Test
-    public void masterMemberAttributes_arePreserved_afterPromotion() throws Exception {
-        memberAttributes_arePreserved_afterPromotion(true);
-    }
-
-    @Test
-    public void normalMemberAttributes_arePreserved_afterPromotion() throws Exception {
-        memberAttributes_arePreserved_afterPromotion(false);
-    }
-
-    private void memberAttributes_arePreserved_afterPromotion(boolean isMaster) throws Exception {
-        final String attribute1 = "attr1";
-        final String attribute2 = "attr2";
-        final String attributeValue = "value";
-
-        TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory();
-        HazelcastInstance[] instances = new HazelcastInstance[2];
-        instances[0] = factory.newHazelcastInstance(new Config().setLiteMember(isMaster));
-        instances[1] = factory.newHazelcastInstance(new Config().setLiteMember(!isMaster));
-
-        HazelcastInstance hz = instances[isMaster ? 0 : 1];
-
-        // Get local member and SET attribute BEFORE promotion
-        Member localMember = hz.getCluster().getLocalMember();
-        localMember.setStringAttribute(attribute1, attributeValue);
-        assertEquals(attributeValue, localMember.getStringAttribute(attribute1));
-
-        // Promote local Lite member
-        hz.getCluster().promoteLocalLiteMember();
-
-        // Get local member and SET attribute AFTER promotion
-        localMember = hz.getCluster().getLocalMember();
-        localMember.setStringAttribute(attribute2, attributeValue);
-
-        // Check attributes from localMember
-        assertEquals(attributeValue, localMember.getStringAttribute(attribute1));
-        assertEquals(attributeValue, localMember.getStringAttribute(attribute2));
-
-        // Check attributes from member list
-        for (Member member : hz.getCluster().getMembers()) {
-            if (member.localMember()) {
-                assertEquals(attributeValue, member.getStringAttribute(attribute1));
-                assertEquals(attributeValue, member.getStringAttribute(attribute2));
-                break;
-            }
-        }
-    }
-
     private void assertPromotionInvocationStarted(HazelcastInstance instance) {
-        final OperationServiceImpl operationService =
-                (OperationServiceImpl) getNode(instance).getNodeEngine().getOperationService();
-        final InvocationRegistry invocationRegistry = operationService.getInvocationRegistry();
+        OperationServiceImpl operationService = getNode(instance).getNodeEngine().getOperationService();
+        InvocationRegistry invocationRegistry = operationService.getInvocationRegistry();
 
-        assertTrueEventually(new AssertTask() {
-            @Override
-            public void run() throws Exception {
-                for (Map.Entry<Long, Invocation> entry : invocationRegistry.entrySet()) {
-                    if (entry.getValue().op instanceof PromoteLiteMemberOp) {
-                        return;
-                    }
+        assertTrueEventually(() -> {
+            for (Map.Entry<Long, Invocation> entry : invocationRegistry.entrySet()) {
+                if (entry.getValue().op instanceof PromoteLiteMemberOp) {
+                    return;
                 }
-                fail("Cannot find PromoteLiteMemberOp invocation!");
             }
+            fail("Cannot find PromoteLiteMemberOp invocation!");
         });
     }
 
-    private static void assertPartitionsAssignedEventually(final HazelcastInstance instance) {
-        assertTrueEventually(new AssertTask() {
-            @Override
-            public void run() throws Exception {
-                assertPartitionsAssigned(instance);
-            }
-        });
+    private static void assertPartitionsAssignedEventually(HazelcastInstance instance) {
+        assertTrueEventually(() -> assertPartitionsAssigned(instance));
     }
 
     private static void assertPartitionsAssigned(HazelcastInstance instance) {
@@ -428,13 +370,8 @@ public class PromoteLiteMemberTest extends HazelcastTestSupport {
         }
     }
 
-    private static void assertAllNormalMembersEventually(final Cluster cluster) {
-        assertTrueEventually(new AssertTask() {
-            @Override
-            public void run() throws Exception {
-                assertAllNormalMembers(cluster);
-            }
-        });
+    private static void assertAllNormalMembersEventually(Cluster cluster) {
+        assertTrueEventually(() -> assertAllNormalMembers(cluster));
     }
 
     private static Member getMember(HazelcastInstance hz) {

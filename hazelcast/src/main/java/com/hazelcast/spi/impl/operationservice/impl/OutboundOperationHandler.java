@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,16 @@
 
 package com.hazelcast.spi.impl.operationservice.impl;
 
-import com.hazelcast.instance.Node;
+import com.hazelcast.cluster.Address;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.nio.Packet;
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.nio.Address;
-import com.hazelcast.nio.Connection;
-import com.hazelcast.nio.ConnectionManager;
-import com.hazelcast.nio.Packet;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.internal.server.ServerConnection;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
-import static com.hazelcast.nio.Packet.FLAG_URGENT;
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.instance.EndpointQualifier.MEMBER;
+import static com.hazelcast.internal.nio.Packet.FLAG_URGENT;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
  * Responsible for sending Operations to another member.
@@ -48,6 +48,18 @@ public class OutboundOperationHandler {
             throw new IllegalArgumentException("Target is this node! -> " + target + ", op: " + op);
         }
 
+        int streamId = op.getPartitionId();
+        return node.getServer()
+                .getConnectionManager(MEMBER)
+                .transmit(toPacket(op), target, streamId);
+    }
+
+    public boolean send(Operation op, ServerConnection connection) {
+        Packet packet = toPacket(op);
+        return connection.write(packet);
+    }
+
+    private Packet toPacket(Operation op) {
         byte[] bytes = serializationService.toBytes(op);
         int partitionId = op.getPartitionId();
         Packet packet = new Packet(bytes, partitionId).setPacketType(Packet.Type.OPERATION);
@@ -55,9 +67,6 @@ public class OutboundOperationHandler {
         if (op.isUrgent()) {
             packet.raiseFlags(FLAG_URGENT);
         }
-
-        ConnectionManager connectionManager = node.getConnectionManager();
-        Connection connection = connectionManager.getOrConnect(target);
-        return connectionManager.transmit(packet, connection);
+        return packet;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.replicatedmap.impl.ReplicatedMapService;
 import com.hazelcast.replicatedmap.impl.record.ReplicatedRecordStore;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.spi.merge.MergingEntryHolder;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
+import com.hazelcast.spi.merge.SplitBrainMergeTypes.ReplicatedMapMergeTypes;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -35,15 +35,16 @@ import java.util.List;
 public class MergeOperation extends AbstractNamedSerializableOperation {
 
     private String name;
-    private List<MergingEntryHolder<Object, Object>> mergingEntries;
-    private SplitBrainMergePolicy mergePolicy;
+    private List<ReplicatedMapMergeTypes<Object, Object>> mergingEntries;
+    private SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes<Object, Object>, Object> mergePolicy;
 
     private transient boolean hasMergedValues;
 
     public MergeOperation() {
     }
 
-    MergeOperation(String name, List<MergingEntryHolder<Object, Object>> mergingEntries, SplitBrainMergePolicy mergePolicy) {
+    MergeOperation(String name, List<ReplicatedMapMergeTypes<Object, Object>> mergingEntries,
+                   SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes<Object, Object>, Object> mergePolicy) {
         this.name = name;
         this.mergingEntries = mergingEntries;
         this.mergePolicy = mergePolicy;
@@ -59,7 +60,7 @@ public class MergeOperation extends AbstractNamedSerializableOperation {
         ReplicatedMapService service = getService();
         ReplicatedRecordStore recordStore = service.getReplicatedRecordStore(name, true, getPartitionId());
 
-        for (MergingEntryHolder<Object, Object> mergingEntry : mergingEntries) {
+        for (ReplicatedMapMergeTypes<Object, Object> mergingEntry : mergingEntries) {
             if (recordStore.merge(mergingEntry, mergePolicy)) {
                 hasMergedValues = true;
             }
@@ -76,7 +77,7 @@ public class MergeOperation extends AbstractNamedSerializableOperation {
         super.writeInternal(out);
         out.writeUTF(name);
         out.writeInt(mergingEntries.size());
-        for (MergingEntryHolder<Object, Object> mergingEntry : mergingEntries) {
+        for (ReplicatedMapMergeTypes mergingEntry : mergingEntries) {
             out.writeObject(mergingEntry);
         }
         out.writeObject(mergePolicy);
@@ -87,16 +88,16 @@ public class MergeOperation extends AbstractNamedSerializableOperation {
         super.readInternal(in);
         name = in.readUTF();
         int size = in.readInt();
-        mergingEntries = new ArrayList<MergingEntryHolder<Object, Object>>(size);
+        mergingEntries = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
-            MergingEntryHolder<Object, Object> mergingEntry = in.readObject();
+            ReplicatedMapMergeTypes mergingEntry = in.readObject();
             mergingEntries.add(mergingEntry);
         }
         mergePolicy = in.readObject();
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ReplicatedMapDataSerializerHook.MERGE;
     }
 }

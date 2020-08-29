@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,26 +18,26 @@ package com.hazelcast.client.impl.protocol.task;
 
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.ClientDeployClassesCodec;
-import com.hazelcast.core.Member;
+import com.hazelcast.cluster.Member;
 import com.hazelcast.core.MemberLeftException;
-import com.hazelcast.instance.Node;
-import com.hazelcast.internal.cluster.Versions;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.internal.usercodedeployment.UserCodeDeploymentService;
 import com.hazelcast.internal.usercodedeployment.impl.operation.DeployClassesOperation;
-import com.hazelcast.nio.Connection;
 import com.hazelcast.security.permission.ActionConstants;
 import com.hazelcast.security.permission.UserCodeDeploymentPermission;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.util.function.Supplier;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 import java.security.Permission;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Message task handling user code deployment from client to cluster
  */
-public class DeployClassesMessageTask extends AbstractMultiTargetMessageTask<ClientDeployClassesCodec.RequestParameters>
+public class DeployClassesMessageTask extends AbstractMultiTargetMessageTask<List<Map.Entry<String, byte[]>>>
         implements Supplier<Operation> {
 
     public DeployClassesMessageTask(ClientMessage clientMessage, Node node, Connection connection) {
@@ -46,14 +46,11 @@ public class DeployClassesMessageTask extends AbstractMultiTargetMessageTask<Cli
 
     @Override
     public Operation get() {
-        return new DeployClassesOperation(parameters.classDefinitions);
+        return new DeployClassesOperation(parameters);
     }
 
     @Override
     protected Supplier<Operation> createOperationSupplier() {
-        if (nodeEngine.getClusterService().getClusterVersion().isLessThan(Versions.V3_9)) {
-            throw new UnsupportedOperationException("Client user code deployment available in 3.9");
-        }
         return this;
     }
 
@@ -73,7 +70,7 @@ public class DeployClassesMessageTask extends AbstractMultiTargetMessageTask<Cli
     }
 
     @Override
-    protected ClientDeployClassesCodec.RequestParameters decodeClientMessage(ClientMessage clientMessage) {
+    protected List<Map.Entry<String, byte[]>> decodeClientMessage(ClientMessage clientMessage) {
         return ClientDeployClassesCodec.decodeRequest(clientMessage);
     }
 

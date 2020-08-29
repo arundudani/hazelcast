@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,22 +18,28 @@ package com.hazelcast.map.impl.tx;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.config.InMemoryFormat;
+import com.hazelcast.config.MapConfig;
 import com.hazelcast.config.NearCacheConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.IMap;
-import com.hazelcast.core.TransactionalMap;
-import com.hazelcast.test.HazelcastParametersRunnerFactory;
+import com.hazelcast.map.IMap;
+import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
+import com.hazelcast.transaction.TransactionContext;
 import com.hazelcast.transaction.TransactionException;
+import com.hazelcast.transaction.TransactionOptions;
+import com.hazelcast.transaction.TransactionalMap;
 import com.hazelcast.transaction.TransactionalTask;
 import com.hazelcast.transaction.TransactionalTaskContext;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
+import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 
 import java.util.Collection;
 import java.util.concurrent.CountDownLatch;
@@ -55,17 +61,11 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
-@Parameterized.UseParametersRunnerFactory(HazelcastParametersRunnerFactory.class)
-@Category({QuickTest.class, ParallelTest.class})
+@UseParametersRunnerFactory(HazelcastParallelParametersRunnerFactory.class)
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
-    @Parameterized.Parameter
-    public InMemoryFormat inMemoryFormat;
-
-    @Parameterized.Parameter(value = 1)
-    public boolean serializeKeys;
-
-    @Parameterized.Parameters(name = "format:{0} serializeKeys:{1}")
+    @Parameters(name = "format:{0} serializeKeys:{1}")
     public static Collection<Object[]> parameters() {
         return asList(new Object[][]{
                 {InMemoryFormat.BINARY, true},
@@ -75,15 +75,79 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
         });
     }
 
+    @Parameter
+    public InMemoryFormat inMemoryFormat;
+
+    @Parameter(value = 1)
+    public boolean serializeKeys;
+
+    @Override
+    protected Config getConfig() {
+        return smallInstanceConfig();
+    }
+
     @Test
-    public void txn_map_contains_newly_put_key_even_it_is_null_cached_after_addition() throws Exception {
+    public void after_txn_commit_near_cache_should_be_invalidated() {
+        Config cfg = getConfig();
+        String mapName = "cache";
+        MapConfig cacheConfig = cfg.getMapConfig(mapName);
+        NearCacheConfig nearCacheConfig = new NearCacheConfig();
+        nearCacheConfig.setInvalidateOnChange(true)
+                .setCacheLocalEntries(true)
+                .setInMemoryFormat(inMemoryFormat)
+                .setSerializeKeys(serializeKeys);
+
+        cacheConfig.setNearCacheConfig(nearCacheConfig);
+
+        HazelcastInstance server = createHazelcastInstance(cfg);
+        IMap map = server.getMap(mapName);
+
+        String key = "key";
+        String oldValue = "oldValue";
+        String updatedValue = "updatedValue";
+
+        // populate imap
+        map.put(key, oldValue);
+
+        // populate near cache
+        Object valueReadBeforeTxnFromNonTxnMap = map.get(key);
+
+        // begin txn
+        TransactionOptions opts = new TransactionOptions();
+        opts.setTransactionType(TransactionOptions.TransactionType.TWO_PHASE);
+        TransactionContext ctx = server.newTransactionContext(opts);
+        ctx.beginTransaction();
+
+        TransactionalMap txnMap = ctx.getMap(mapName);
+        Object valueReadInsideTxnFromTxnMapBeforeUpdate = txnMap.get(key);
+
+        txnMap.put(key, updatedValue);
+
+        Object valueReadInsideTxnFromTxnMapAfterUpdate = txnMap.get(key);
+        Object valueReadInsideTxnFromNonTxnMapAfterUpdate = map.get(key);
+
+        ctx.commitTransaction();
+
+        // check values read from txn map
+        assertEquals(oldValue, valueReadInsideTxnFromTxnMapBeforeUpdate);
+        assertEquals(updatedValue, valueReadInsideTxnFromTxnMapAfterUpdate);
+
+        // check values read from non-txn map
+        assertEquals(oldValue, valueReadBeforeTxnFromNonTxnMap);
+        assertEquals(oldValue, valueReadInsideTxnFromNonTxnMapAfterUpdate);
+        Object valueReadAfterTxnFromNonTxnMap = map.get(key);
+        assertEquals(updatedValue, valueReadAfterTxnFromNonTxnMap);
+    }
+
+    @Test
+    public void txn_map_contains_newly_put_key_even_it_is_null_cached_after_addition() {
         final String mapName = "test";
         final int key = 1;
 
-        NearCacheConfig nearCacheConfig = createNearCacheConfig(mapName);
-        nearCacheConfig.setInvalidateOnChange(true);
+        NearCacheConfig nearCacheConfig = createNearCacheConfig(mapName)
+                .setInvalidateOnChange(true);
 
-        Config config = new Config();
+        Config config = smallInstanceConfig();
         config.getMapConfig(mapName).setNearCacheConfig(nearCacheConfig);
 
         final HazelcastInstance instance = createHazelcastInstance(config);
@@ -96,19 +160,18 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
         Thread txnPutThread = new Thread(new Runnable() {
             @Override
             public void run() {
-
                 Boolean result = instance.executeTransaction(new TransactionalTask<Boolean>() {
                     @Override
                     public Boolean execute(TransactionalTaskContext context) throws TransactionException {
                         TransactionalMap<Integer, Integer> map = context.getMap(mapName);
-                        // 1. First put key into txn map inside txn
+                        // 1. first put key into txn map inside txn
                         map.put(key, 1);
 
                         waitTxnPut.countDown();
 
                         assertOpenEventually(waitNullCaching);
 
-                        // 3. After caching key as null inside Near Cache, check to see if key exist for txn
+                        // 3. after caching key as null inside Near Cache, check that key exist for txn
                         return map.containsKey(key);
                     }
                 });
@@ -119,8 +182,7 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
         txnPutThread.start();
 
         assertOpenEventually(waitTxnPut);
-        // 2. Cache key as null into Near Cache,
-        //    we know we didn't commit above txn and key is null inside map
+        // 2. cache key as null into Near Cache (we know we didn't commit the above txn and key is null inside map)
         instance.getMap(mapName).get(key);
 
         waitNullCaching.countDown();
@@ -131,69 +193,69 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
     }
 
     @Test
-    public void txn_set_invalidates_near_cache() throws Exception {
-        txn_invalidates_near_cache(SET);
+    public void txn_set_invalidates_near_cache() {
+        testTxnInvalidatesNearCache(SET);
     }
 
     @Test
-    public void txn_put_invalidates_near_cache() throws Exception {
-        txn_invalidates_near_cache(PUT);
+    public void txn_put_invalidates_near_cache() {
+        testTxnInvalidatesNearCache(PUT);
     }
 
     @Test
-    public void txn_putIfAbsent_invalidates_near_cache() throws Exception {
-        txn_invalidates_near_cache(PUT_IF_ABSENT);
+    public void txn_putIfAbsent_invalidates_near_cache() {
+        testTxnInvalidatesNearCache(PUT_IF_ABSENT);
     }
 
     @Test
-    public void txn_putTTL_invalidates_near_cache() throws Exception {
-        txn_invalidates_near_cache(PUT_TTL);
+    public void txn_putTTL_invalidates_near_cache() {
+        testTxnInvalidatesNearCache(PUT_TTL);
     }
 
     @Test
-    public void txn_delete_invalidates_near_cache() throws Exception {
-        txn_invalidates_near_cache(DELETE);
+    public void txn_delete_invalidates_near_cache() {
+        testTxnInvalidatesNearCache(DELETE);
     }
 
     @Test
-    public void txn_replace_invalidates_near_cache() throws Exception {
-        txn_invalidates_near_cache(REPLACE);
+    public void txn_replace_invalidates_near_cache() {
+        testTxnInvalidatesNearCache(REPLACE);
     }
 
     @Test
-    public void txn_replaceIfSame_invalidates_near_cache() throws Exception {
-        txn_invalidates_near_cache(REPLACE_IF_SAME);
+    public void txn_replaceIfSame_invalidates_near_cache() {
+        testTxnInvalidatesNearCache(REPLACE_IF_SAME);
     }
 
     @Test
-    public void txn_containsKey_sees_latest_value_after_delete() throws Exception {
-        txn_invalidates_near_cache(CONTAINS_KEY);
+    public void txn_containsKey_sees_latest_value_after_delete() {
+        testTxnInvalidatesNearCache(CONTAINS_KEY);
     }
 
-    private void txn_invalidates_near_cache(InvalidatorTxnOp invalidatorTxnTask) throws Exception {
+    private void testTxnInvalidatesNearCache(InvalidatorTxnOp invalidatorTxnTask) {
         final String mapName = "test";
         final int numberOfEntries = 1000;
 
-        NearCacheConfig nearCacheConfig = createNearCacheConfig(mapName);
-        nearCacheConfig.setInvalidateOnChange(true);
+        NearCacheConfig nearCacheConfig = createNearCacheConfig(mapName)
+                .setInvalidateOnChange(true);
 
-        Config config = new Config();
+        Config config = smallInstanceConfig();
         config.getMapConfig(mapName).setNearCacheConfig(nearCacheConfig);
 
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory();
-        HazelcastInstance node1 = factory.newHazelcastInstance(config);
-        HazelcastInstance node2 = factory.newHazelcastInstance(config);
-        HazelcastInstance node3 = factory.newHazelcastInstance(config);
+        HazelcastInstance hz = factory.newHazelcastInstance(config);
+        factory.newHazelcastInstance(config);
+        factory.newHazelcastInstance(config);
 
-        IMap map = node1.getMap(mapName);
+        IMap<Integer, Integer> map = hz.getMap(mapName);
 
-        // 1. Populate Near Cache
+        // 1. populate Near Cache
         invalidatorTxnTask.doPopulateNearCache(map, numberOfEntries);
 
-        // 2. Run a txn task which causes invalidation
-        node1.executeTransaction(invalidatorTxnTask.createTxnTask(mapName, numberOfEntries));
+        // 2. run a txn task which causes invalidation
+        hz.executeTransaction(invalidatorTxnTask.createTxnTask(mapName, numberOfEntries));
 
-        // 3. Assert
+        // 3. assert
         invalidatorTxnTask.doAssertion(map, numberOfEntries);
     }
 
@@ -205,16 +267,15 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
                 .setSerializeKeys(serializeKeys);
     }
 
-
     enum InvalidatorTxnOp {
 
         SET {
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.set(i, i);
                         }
@@ -224,20 +285,19 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
             }
 
             @Override
-            void doAssertion(IMap map, int numberOfEntries) {
+            void doAssertion(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
-                    assertEquals(i, map.get(i));
+                    assertEquals(i, (int) map.get(i));
                 }
             }
         },
 
         DELETE {
             @Override
-            void doPopulateNearCache(IMap map, int numberOfEntries) {
+            void doPopulateNearCache(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
                     map.set(i, i);
                 }
-
                 for (int i = 0; i < numberOfEntries; i++) {
                     map.get(i);
                 }
@@ -245,10 +305,10 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.delete(i);
                         }
@@ -258,7 +318,7 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
             }
 
             @Override
-            void doAssertion(IMap map, int numberOfEntries) {
+            void doAssertion(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
                     assertNull(map.get(i));
                 }
@@ -268,10 +328,10 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
         PUT {
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.put(i, i);
                         }
@@ -283,11 +343,10 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
         REPLACE {
             @Override
-            void doPopulateNearCache(IMap map, int numberOfEntries) {
+            void doPopulateNearCache(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
                     map.put(i, i);
                 }
-
                 for (int i = 0; i < numberOfEntries; i++) {
                     map.get(i);
                 }
@@ -295,10 +354,10 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.replace(i, 2 * i);
                         }
@@ -308,20 +367,19 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
             }
 
             @Override
-            void doAssertion(IMap map, int numberOfEntries) {
+            void doAssertion(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
-                    assertEquals(2 * i, map.get(i));
+                    assertEquals(2 * i, (int) map.get(i));
                 }
             }
         },
 
         REPLACE_IF_SAME {
             @Override
-            void doPopulateNearCache(IMap map, int numberOfEntries) {
+            void doPopulateNearCache(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
                     map.put(i, i);
                 }
-
                 for (int i = 0; i < numberOfEntries; i++) {
                     map.get(i);
                 }
@@ -329,10 +387,10 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.replace(i, i, 2 * i);
                         }
@@ -342,9 +400,9 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
             }
 
             @Override
-            void doAssertion(IMap map, int numberOfEntries) {
+            void doAssertion(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
-                    assertEquals(2 * i, map.get(i));
+                    assertEquals(2 * i, (int) map.get(i));
                 }
             }
         },
@@ -352,10 +410,10 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
         PUT_IF_ABSENT {
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.putIfAbsent(i, i);
                         }
@@ -368,10 +426,10 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
         PUT_TTL {
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.put(i, i, 100, TimeUnit.SECONDS);
                         }
@@ -383,7 +441,7 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
         CONTAINS_KEY {
             @Override
-            void doPopulateNearCache(IMap map, int numberOfEntries) {
+            void doPopulateNearCache(IMap<Integer, Integer> map, int numberOfEntries) {
                 for (int i = 0; i < numberOfEntries; i++) {
                     map.put(i, i);
                 }
@@ -395,37 +453,33 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
             @Override
             TransactionalTask createTxnTask(final String mapName, final int numberOfEntries) {
-                return new TransactionalTask<Object>() {
+                return new TransactionalTask<Integer>() {
                     @Override
-                    public Object execute(TransactionalTaskContext context) throws TransactionException {
-                        TransactionalMap<Object, Object> map = context.getMap(mapName);
-
+                    public Integer execute(TransactionalTaskContext context) throws TransactionException {
+                        TransactionalMap<Integer, Integer> map = context.getMap(mapName);
                         for (int i = 0; i < numberOfEntries; i++) {
                             assertTrue(map.containsKey(i));
                         }
-
                         for (int i = 0; i < numberOfEntries; i++) {
                             map.delete(i);
                         }
-
                         for (int i = 0; i < numberOfEntries; i++) {
                             assertFalse(map.containsKey(i));
                         }
-
                         return null;
                     }
                 };
             }
 
             @Override
-            void doAssertion(IMap map, int numberOfEntries) {
+            void doAssertion(IMap<Integer, Integer> map, int numberOfEntries) {
                 // NOP
             }
         };
 
-        // Default populate impl. Override when needed
-        void doPopulateNearCache(IMap map, int numberOfEntries) {
-            // Populate Near Cache with nulls
+        // default populate implementation, override when needed
+        void doPopulateNearCache(IMap<Integer, Integer> map, int numberOfEntries) {
+            // populate Near Cache with nulls
             for (int i = 0; i < numberOfEntries; i++) {
                 map.get(i);
             }
@@ -433,11 +487,11 @@ public class TxnMapNearCacheInvalidationTest extends HazelcastTestSupport {
 
         abstract TransactionalTask createTxnTask(String mapName, int numberOfEntries);
 
-        // Default assertion impl. Override when needed
-        void doAssertion(IMap map, int numberOfEntries) {
-            // Access map out-side txn
+        // default assertion implementation, override when needed
+        void doAssertion(IMap<Integer, Integer> map, int numberOfEntries) {
+            // access map out-side txn
             for (int i = 0; i < numberOfEntries; i++) {
-                assertEquals("map size=" + map.size(), i, map.get(i));
+                assertEquals("map size=" + map.size(), i, (int) map.get(i));
             }
         }
     }

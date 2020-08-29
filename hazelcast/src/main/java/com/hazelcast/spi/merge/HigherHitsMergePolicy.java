@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,39 +16,39 @@
 
 package com.hazelcast.spi.merge;
 
+import com.hazelcast.spi.impl.merge.AbstractSplitBrainMergePolicy;
 import com.hazelcast.spi.impl.merge.SplitBrainDataSerializerHook;
 
 /**
  * Merges data structure entries from source to destination data structure if the source entry
  * has more hits than the destination one.
  *
+ * @param <V> the type of the merged value
+ * @param <T> the type of the merging value
  * @since 3.10
  */
-public class HigherHitsMergePolicy extends AbstractSplitBrainMergePolicy {
+public class HigherHitsMergePolicy<V, T extends MergingValue<V> & MergingHits>
+        extends AbstractSplitBrainMergePolicy<V, T, Object> {
 
     public HigherHitsMergePolicy() {
     }
 
     @Override
-    public <V> V merge(MergingValueHolder<V> mergingValue, MergingValueHolder<V> existingValue) {
-        checkInstanceOf(mergingValue, HitsHolder.class);
-        checkInstanceOf(existingValue, HitsHolder.class);
+    public Object merge(T mergingValue, T existingValue) {
         if (mergingValue == null) {
-            return existingValue.getValue();
+            return existingValue.getRawValue();
         }
         if (existingValue == null) {
-            return mergingValue.getValue();
+            return mergingValue.getRawValue();
         }
-        HitsHolder merging = (HitsHolder) mergingValue;
-        HitsHolder existing = (HitsHolder) existingValue;
-        if (merging.getHits() >= existing.getHits()) {
-            return mergingValue.getValue();
+        if (mergingValue.getHits() >= existingValue.getHits()) {
+            return mergingValue.getRawValue();
         }
-        return existingValue.getValue();
+        return existingValue.getRawValue();
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return SplitBrainDataSerializerHook.HIGHER_HITS;
     }
 }

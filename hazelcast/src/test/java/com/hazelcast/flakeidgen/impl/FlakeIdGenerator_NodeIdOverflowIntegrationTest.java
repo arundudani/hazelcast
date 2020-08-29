@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,17 @@
 
 package com.hazelcast.flakeidgen.impl;
 
+import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.flakeidgen.FlakeIdGenerator;
-import com.hazelcast.instance.MemberImpl;
+import com.hazelcast.cluster.impl.MemberImpl;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -32,13 +34,23 @@ import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class FlakeIdGenerator_NodeIdOverflowIntegrationTest {
 
     @Rule
     public ExpectedException exception = ExpectedException.none();
 
     private TestHazelcastInstanceFactory factory = new TestHazelcastInstanceFactory();
+    private HazelcastInstance instance2;
+    private HazelcastInstance instance1;
+
+    @Before
+    public void before() {
+        Config cfg = new Config();
+        cfg.getFlakeIdGeneratorConfig("gen").setPrefetchCount(1);
+        instance1 = factory.newHazelcastInstance(cfg);
+        instance2 = factory.newHazelcastInstance(cfg);
+    }
 
     @After
     public void after() {
@@ -46,20 +58,18 @@ public class FlakeIdGenerator_NodeIdOverflowIntegrationTest {
     }
 
     @Test
-    public void when_memberOutOfRangeNodeId_then_theOtherMemberUsed() throws Exception {
-        HazelcastInstance instance1 = factory.newHazelcastInstance();
-        HazelcastInstance instance2 = factory.newHazelcastInstance();
+    public void when_memberOutOfRangeNodeId_then_theOtherMemberUsed() {
         assignOutOfRangeNodeId(instance2);
 
         // let's use the instance with out-of-range node ID to generate IDs, it should succeed
         FlakeIdGenerator gen = instance2.getFlakeIdGenerator("gen");
-        gen.newId();
+        for (int i = 0; i < 100; i++) {
+            gen.newId();
+        }
     }
 
     @Test
     public void when_allMembersOutOfRangeNodeId_then_error() {
-        HazelcastInstance instance1 = factory.newHazelcastInstance();
-        HazelcastInstance instance2 = factory.newHazelcastInstance();
         assignOutOfRangeNodeId(instance1);
         assignOutOfRangeNodeId(instance2);
 
@@ -70,8 +80,8 @@ public class FlakeIdGenerator_NodeIdOverflowIntegrationTest {
         gen.newId();
     }
 
-    private void assignOutOfRangeNodeId(HazelcastInstance instance2) {
-        MemberImpl member = (MemberImpl) instance2.getCluster().getLocalMember();
+    private static void assignOutOfRangeNodeId(HazelcastInstance instance) {
+        MemberImpl member = (MemberImpl) instance.getCluster().getLocalMember();
         member.setMemberListJoinVersion(100000);
     }
 }

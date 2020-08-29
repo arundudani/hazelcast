@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,19 +16,14 @@
 
 package com.hazelcast.query.impl.getters;
 
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.internal.serialization.PortableContext;
-import com.hazelcast.internal.serialization.impl.DefaultPortableReader;
-import com.hazelcast.nio.serialization.ClassDefinition;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.nio.serialization.FieldDefinition;
-import com.hazelcast.nio.serialization.PortableReader;
+import com.hazelcast.internal.serialization.impl.GenericRecordQueryReader;
 
 final class PortableGetter extends Getter {
-
     private final InternalSerializationService serializationService;
 
-    public PortableGetter(InternalSerializationService serializationService) {
+    PortableGetter(InternalSerializationService serializationService) {
         super(null);
         this.serializationService = serializationService;
     }
@@ -36,16 +31,8 @@ final class PortableGetter extends Getter {
     @Override
     Object getValue(Object target, String fieldPath) throws Exception {
         Data data = (Data) target;
-        PortableContext context = serializationService.getPortableContext();
-        PortableReader reader = serializationService.createPortableReader(data);
-        ClassDefinition classDefinition = context.lookupClassDefinition(data);
-        FieldDefinition fieldDefinition = context.getFieldDefinition(classDefinition, fieldPath);
-
-        if (fieldDefinition != null) {
-            return ((DefaultPortableReader) reader).read(fieldPath);
-        } else {
-            return null;
-        }
+        GenericRecordQueryReader reader = new GenericRecordQueryReader(serializationService.readAsInternalGenericRecord(data));
+        return reader.read(fieldPath);
     }
 
     @Override

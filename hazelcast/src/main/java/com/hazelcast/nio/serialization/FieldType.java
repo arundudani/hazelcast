@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,14 @@
 
 package com.hazelcast.nio.serialization;
 
-import static com.hazelcast.nio.Bits.BOOLEAN_SIZE_IN_BYTES;
-import static com.hazelcast.nio.Bits.BYTE_SIZE_IN_BYTES;
-import static com.hazelcast.nio.Bits.CHAR_SIZE_IN_BYTES;
-import static com.hazelcast.nio.Bits.DOUBLE_SIZE_IN_BYTES;
-import static com.hazelcast.nio.Bits.FLOAT_SIZE_IN_BYTES;
-import static com.hazelcast.nio.Bits.INT_SIZE_IN_BYTES;
-import static com.hazelcast.nio.Bits.LONG_SIZE_IN_BYTES;
-import static com.hazelcast.nio.Bits.SHORT_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.BOOLEAN_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.BYTE_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.CHAR_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.DOUBLE_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.FLOAT_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.INT_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.LONG_SIZE_IN_BYTES;
+import static com.hazelcast.internal.nio.Bits.SHORT_SIZE_IN_BYTES;
 import static java.lang.Integer.MAX_VALUE;
 
 public enum FieldType {
@@ -89,12 +89,13 @@ public enum FieldType {
 
     /**
      * @return size of an element of the type represented by this object
-     * @throws IllegalArgumentException if type does not have a definite type. Invoke hasDefiniteSize() to check before.
+     * @throws IllegalArgumentException if the type does not have a definite size.
+     *      Invoke {@link #hasDefiniteSize()} to check first.
      */
     public int getTypeSize() throws IllegalArgumentException {
         if (elementSize == MAX_VALUE) {
             // unknown size case
-            throw new IllegalArgumentException("Unsupported type - the size is variable or unknown!");
+            throw new IllegalArgumentException("Unsupported type - the size is variable or unknown");
         }
         return elementSize;
     }

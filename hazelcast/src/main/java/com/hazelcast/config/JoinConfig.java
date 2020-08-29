@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ package com.hazelcast.config;
 
 import java.util.Collection;
 
-import static com.hazelcast.util.Preconditions.isNotNull;
+import static com.hazelcast.internal.util.Preconditions.isNotNull;
 
 /**
- * Contains the 3 different join configurations; TCP-IP/multicast/AWS. Only one of them should be enabled!
+ * Contains the multiple different join configuration. Only one of them should be enabled!
  */
 public class JoinConfig {
 
@@ -31,7 +31,17 @@ public class JoinConfig {
 
     private AwsConfig awsConfig = new AwsConfig();
 
+    private GcpConfig gcpConfig = new GcpConfig();
+
+    private AzureConfig azureConfig = new AzureConfig();
+
+    private KubernetesConfig kubernetesConfig = new KubernetesConfig();
+
+    private EurekaConfig eurekaConfig = new EurekaConfig();
+
     private DiscoveryConfig discoveryConfig = new DiscoveryConfig();
+
+    private AutoDetectionConfig autoDetectionConfig = new AutoDetectionConfig();
 
     /**
      * @return the multicastConfig join configuration
@@ -82,6 +92,70 @@ public class JoinConfig {
     }
 
     /**
+     * @return the gcpConfig join configuration
+     */
+    public GcpConfig getGcpConfig() {
+        return gcpConfig;
+    }
+
+    /**
+     * @param gcpConfig the GcpConfig join configuration to set
+     * @throws IllegalArgumentException if gcpConfig is null
+     */
+    public JoinConfig setGcpConfig(final GcpConfig gcpConfig) {
+        this.gcpConfig = isNotNull(gcpConfig, "gcpConfig");
+        return this;
+    }
+
+    /**
+     * @return the azureConfig join configuration
+     */
+    public AzureConfig getAzureConfig() {
+        return azureConfig;
+    }
+
+    /**
+     * @param azureConfig the AzureConfig join configuration to set
+     * @throws IllegalArgumentException if azureConfig is null
+     */
+    public JoinConfig setAzureConfig(final AzureConfig azureConfig) {
+        this.azureConfig = isNotNull(azureConfig, "azureConfig");
+        return this;
+    }
+
+    /**
+     * @return the kubernetesConfig join configuration
+     */
+    public KubernetesConfig getKubernetesConfig() {
+        return kubernetesConfig;
+    }
+
+    /**
+     * @param kubernetesConfig the KubernetesConfig join configuration to set
+     * @throws IllegalArgumentException if kubernetesConfig is null
+     */
+    public JoinConfig setKubernetesConfig(final KubernetesConfig kubernetesConfig) {
+        this.kubernetesConfig = isNotNull(kubernetesConfig, "kubernetesConfig");
+        return this;
+    }
+
+    /**
+     * @return the eurekaConfig join configuration
+     */
+    public EurekaConfig getEurekaConfig() {
+        return eurekaConfig;
+    }
+
+    /**
+     * @param eurekaConfig the EurekaConfig join configuration to set
+     * @throws IllegalArgumentException if eurekaConfig is null
+     */
+    public JoinConfig setEurekaConfig(final EurekaConfig eurekaConfig) {
+        this.eurekaConfig = isNotNull(eurekaConfig, "eurekaConfig");
+        return this;
+    }
+
+    /**
      * Returns the currently defined {@link DiscoveryConfig}
      *
      * @return current DiscoveryProvidersConfig instance
@@ -102,43 +176,76 @@ public class JoinConfig {
     }
 
     /**
-     * Verifies this JoinConfig is valid. At most a single joiner should be active.
-     *
-     * @throws IllegalStateException when the join config is not valid
+     * @return the autoDetectionConfig join configuration
      */
-    public void verify() {
-        if (getTcpIpConfig().isEnabled() && getMulticastConfig().isEnabled()) {
-            throw new InvalidConfigurationException("TCP/IP and Multicast join can't be enabled at the same time");
-        }
-
-        if (getTcpIpConfig().isEnabled() && getAwsConfig().isEnabled()) {
-            throw new InvalidConfigurationException("TCP/IP and AWS join can't be enabled at the same time");
-        }
-
-        if (getMulticastConfig().isEnabled() && getAwsConfig().isEnabled()) {
-            throw new InvalidConfigurationException("Multicast and AWS join can't be enabled at the same time");
-        }
-        verifyDiscoveryProviderConfig();
+    public AutoDetectionConfig getAutoDetectionConfig() {
+        return autoDetectionConfig;
     }
 
     /**
-     * Verifies this JoinConfig is valid. When Discovery SPI enabled other discovery
-     * methods should be disabled
-     *
-     * @throws IllegalStateException when the join config is not valid
+     * @param autoDetectionConfig the autoDetectionConfig join configuration to set
+     * @throws IllegalArgumentException if autoDetectionConfig is null
      */
-    private void verifyDiscoveryProviderConfig() {
-        Collection<DiscoveryStrategyConfig> discoveryStrategyConfigs = discoveryConfig.getDiscoveryStrategyConfigs();
-        if (discoveryStrategyConfigs.size() > 0) {
-            if (getMulticastConfig().isEnabled()) {
-                throw new InvalidConfigurationException(
-                        "Multicast and DiscoveryProviders join can't be enabled at the same time");
-            }
+    public JoinConfig setAutoDetectionConfig(final AutoDetectionConfig autoDetectionConfig) {
+        this.autoDetectionConfig = isNotNull(autoDetectionConfig, "autoDetectionConfig");
+        return this;
+    }
 
-            if (getAwsConfig().isEnabled()) {
-                throw new InvalidConfigurationException(
-                        "AWS and DiscoveryProviders join can't be enabled at the same time");
-            }
+    /**
+     * Any other join configuration takes precedence over auto-discovery, so auto-discovery is enabled only when no other join
+     * strategy is enabled.
+     *
+     * @return true if auto-detection is enabled
+     */
+    @SuppressWarnings("checkstyle:booleanexpressioncomplexity")
+    public boolean isAutoDetectionEnabled() {
+        return autoDetectionConfig.isEnabled()
+                && !multicastConfig.isEnabled()
+                && !tcpIpConfig.isEnabled()
+                && !awsConfig.isEnabled()
+                && !gcpConfig.isEnabled()
+                && !azureConfig.isEnabled()
+                && !kubernetesConfig.isEnabled()
+                && !eurekaConfig.isEnabled()
+                && !discoveryConfig.isEnabled();
+    }
+
+    /**
+     * Verifies this JoinConfig is valid. At most a single joiner should be active.
+     *
+     * @throws InvalidConfigurationException when the join config is not valid
+     */
+    @SuppressWarnings("checkstyle:npathcomplexity")
+    public void verify() {
+        int countEnabled = 0;
+        if (getTcpIpConfig().isEnabled()) {
+            countEnabled++;
+        }
+        if (getMulticastConfig().isEnabled()) {
+            countEnabled++;
+        }
+        if (getAwsConfig().isEnabled()) {
+            countEnabled++;
+        }
+        if (getGcpConfig().isEnabled()) {
+            countEnabled++;
+        }
+        if (getAzureConfig().isEnabled()) {
+            countEnabled++;
+        }
+        if (getKubernetesConfig().isEnabled()) {
+            countEnabled++;
+        }
+        if (getEurekaConfig().isEnabled()) {
+            countEnabled++;
+        }
+
+        Collection<DiscoveryStrategyConfig> discoveryStrategyConfigs = discoveryConfig.getDiscoveryStrategyConfigs();
+        countEnabled += discoveryStrategyConfigs.size();
+
+        if (countEnabled > 1) {
+            throw new InvalidConfigurationException("Multiple join configuration cannot be enabled at the same time. Enable only "
+                    + "one of: TCP/IP, Multicast, AWS, GCP, Azure, Kubernetes, Eureka, or Discovery Strategy");
         }
     }
 
@@ -148,7 +255,12 @@ public class JoinConfig {
                 + "multicastConfig=" + multicastConfig
                 + ", tcpIpConfig=" + tcpIpConfig
                 + ", awsConfig=" + awsConfig
-                + ", discoveryProvidersConfig=" + discoveryConfig
+                + ", gcpConfig=" + gcpConfig
+                + ", azureConfig=" + azureConfig
+                + ", kubernetesConfig=" + kubernetesConfig
+                + ", eurekaConfig=" + eurekaConfig
+                + ", discoveryConfig=" + discoveryConfig
+                + ", autoDetectionConfig=" + autoDetectionConfig
                 + '}';
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package com.hazelcast.spi.merge;
 
+import com.hazelcast.spi.impl.merge.AbstractSplitBrainMergePolicy;
 import com.hazelcast.spi.impl.merge.SplitBrainDataSerializerHook;
 
 /**
@@ -24,33 +25,32 @@ import com.hazelcast.spi.impl.merge.SplitBrainDataSerializerHook;
  * <p>
  * <b>Note:</b> This policy can only be used if the clocks of the nodes are in sync.
  *
+ * @param <V> the type of the merged value
+ * @param <T> the type of the merging value
  * @since 3.10
  */
-public class LatestAccessMergePolicy extends AbstractSplitBrainMergePolicy {
+public class LatestAccessMergePolicy<V, T extends MergingValue<V> & MergingLastAccessTime>
+        extends AbstractSplitBrainMergePolicy<V, T, Object> {
 
     public LatestAccessMergePolicy() {
     }
 
     @Override
-    public <V> V merge(MergingValueHolder<V> mergingValue, MergingValueHolder<V> existingValue) {
-        checkInstanceOf(mergingValue, LastAccessTimeHolder.class);
-        checkInstanceOf(existingValue, LastAccessTimeHolder.class);
+    public Object merge(T mergingValue, T existingValue) {
         if (mergingValue == null) {
-            return existingValue.getValue();
+            return existingValue.getRawValue();
         }
         if (existingValue == null) {
-            return mergingValue.getValue();
+            return mergingValue.getRawValue();
         }
-        LastAccessTimeHolder merging = (LastAccessTimeHolder) mergingValue;
-        LastAccessTimeHolder existing = (LastAccessTimeHolder) existingValue;
-        if (merging.getLastAccessTime() >= existing.getLastAccessTime()) {
-            return mergingValue.getValue();
+        if (mergingValue.getLastAccessTime() >= existingValue.getLastAccessTime()) {
+            return mergingValue.getRawValue();
         }
-        return existingValue.getValue();
+        return existingValue.getRawValue();
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return SplitBrainDataSerializerHook.LATEST_ACCESS;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,15 @@
 
 package com.hazelcast.nio;
 
+import com.hazelcast.internal.nio.Packet;
+import com.hazelcast.internal.nio.PacketIOHelper;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.SerializationServiceBuilder;
 import com.hazelcast.internal.serialization.impl.DefaultSerializationServiceBuilder;
 import com.hazelcast.nio.serialization.Portable;
 import com.hazelcast.nio.serialization.PortableFactory;
-import com.hazelcast.nio.serialization.SerializationConcurrencyTest;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.serialization.impl.SerializationConcurrencyTest;
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.annotation.QuickTest;
@@ -37,10 +39,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 
-import static com.hazelcast.nio.serialization.SerializationConcurrencyTest.FACTORY_ID;
-import static com.hazelcast.nio.serialization.SerializationConcurrencyTest.Person;
-import static com.hazelcast.nio.serialization.SerializationConcurrencyTest.PortableAddress;
-import static com.hazelcast.nio.serialization.SerializationConcurrencyTest.PortablePerson;
+import static com.hazelcast.internal.serialization.impl.SerializationConcurrencyTest.FACTORY_ID;
+import static com.hazelcast.internal.serialization.impl.SerializationConcurrencyTest.Person;
+import static com.hazelcast.internal.serialization.impl.SerializationConcurrencyTest.PortableAddress;
+import static com.hazelcast.internal.serialization.impl.SerializationConcurrencyTest.PortablePerson;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -78,8 +80,9 @@ public class PacketIOHelperTest extends HazelcastTestSupport {
                         return new PortablePerson();
                     case 2:
                         return new PortableAddress();
+                    default:
+                        throw new IllegalArgumentException();
                 }
-                throw new IllegalArgumentException();
             }
         };
         return new DefaultSerializationServiceBuilder().addPortableFactory(FACTORY_ID, portableFactory);

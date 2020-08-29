@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 
 package com.hazelcast.spi.discovery.impl;
 
-import com.hazelcast.nio.Address;
+import com.hazelcast.cluster.Address;
 import com.hazelcast.spi.discovery.AbstractDiscoveryStrategy;
 import com.hazelcast.spi.discovery.DiscoveryNode;
 import com.hazelcast.spi.discovery.SimpleDiscoveryNode;
 import com.hazelcast.test.HazelcastParallelClassRunner;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -37,11 +37,11 @@ import static com.hazelcast.test.HazelcastTestSupport.assertOpenEventually;
 import static org.junit.Assert.assertEquals;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class SimplePredefinedDiscoveryServiceTest {
 
     @Test
-    public void start() throws Exception {
+    public void start() {
         final CountDownLatch startCalled = new CountDownLatch(1);
         final PredefinedDiscoveryService service = new PredefinedDiscoveryService(new ExtendableDiscoveryStrategy() {
             @Override
@@ -54,7 +54,7 @@ public class SimplePredefinedDiscoveryServiceTest {
     }
 
     @Test
-    public void discoverNodes() throws Exception {
+    public void discoverNodes() {
         final SimpleDiscoveryNode node = new SimpleDiscoveryNode(new Address());
         final Iterable<DiscoveryNode> nodes = Arrays.<DiscoveryNode>asList(node, node);
         final PredefinedDiscoveryService service = new PredefinedDiscoveryService(new ExtendableDiscoveryStrategy() {
@@ -67,13 +67,13 @@ public class SimplePredefinedDiscoveryServiceTest {
     }
 
     @Test
-    public void discoverLocalMetadata() throws Exception {
-        final Map<String, Object> metadata = new HashMap<String, Object>();
-        metadata.put("a", 1);
-        metadata.put("b", 2);
+    public void discoverLocalMetadata() {
+        final Map<String, String> metadata = new HashMap<>();
+        metadata.put("a", "1");
+        metadata.put("b", "2");
         final PredefinedDiscoveryService service = new PredefinedDiscoveryService(new ExtendableDiscoveryStrategy() {
             @Override
-            public Map<String, Object> discoverLocalMetadata() {
+            public Map<String, String> discoverLocalMetadata() {
                 return metadata;
             }
         });
@@ -81,7 +81,7 @@ public class SimplePredefinedDiscoveryServiceTest {
     }
 
     @Test
-    public void destroy() throws Exception {
+    public void destroy() {
         final CountDownLatch destroyCalled = new CountDownLatch(1);
         final PredefinedDiscoveryService service = new PredefinedDiscoveryService(new ExtendableDiscoveryStrategy() {
             @Override
@@ -93,9 +93,9 @@ public class SimplePredefinedDiscoveryServiceTest {
         assertOpenEventually(destroyCalled);
     }
 
-    private static abstract class ExtendableDiscoveryStrategy extends AbstractDiscoveryStrategy {
+    private abstract static class ExtendableDiscoveryStrategy extends AbstractDiscoveryStrategy {
 
-        public ExtendableDiscoveryStrategy() {
+        ExtendableDiscoveryStrategy() {
             super(null, Collections.<String, Comparable>emptyMap());
         }
 

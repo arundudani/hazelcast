@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,18 +17,19 @@
 package com.hazelcast.multimap.impl.txn;
 
 import com.hazelcast.core.EntryEventType;
+import com.hazelcast.internal.util.Timer;
 import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
 import com.hazelcast.multimap.impl.MultiMapRecord;
 import com.hazelcast.multimap.impl.MultiMapService;
 import com.hazelcast.multimap.impl.MultiMapValue;
-import com.hazelcast.multimap.impl.operations.MultiMapKeyBasedOperation;
+import com.hazelcast.multimap.impl.operations.AbstractKeyBasedMultiMapOperation;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.BackupAwareOperation;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.impl.MutatingOperation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupAwareOperation;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.MutatingOperation;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,11 +37,12 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedList;
 
-public class TxnRemoveAllOperation extends MultiMapKeyBasedOperation implements BackupAwareOperation, MutatingOperation {
+public class TxnRemoveAllOperation extends AbstractKeyBasedMultiMapOperation implements BackupAwareOperation, MutatingOperation {
 
-    Collection<Long> recordIds;
-    long startTimeNanos = -1;
-    Collection<MultiMapRecord> removed;
+    private Collection<Long> recordIds;
+
+    private transient long startTimeNanos;
+    private transient Collection<MultiMapRecord> removed;
 
     public TxnRemoveAllOperation() {
     }
@@ -55,16 +57,17 @@ public class TxnRemoveAllOperation extends MultiMapKeyBasedOperation implements 
 
     @Override
     public void run() throws Exception {
-        startTimeNanos = System.nanoTime();
+        startTimeNanos = Timer.nanos();
         MultiMapContainer container = getOrCreateContainer();
         MultiMapValue multiMapValue = container.getOrCreateMultiMapValue(dataKey);
-        response = true;
         for (Long recordId : recordIds) {
             if (!multiMapValue.containsRecordId(recordId)) {
                 response = false;
                 return;
             }
         }
+        response = true;
+        container.update();
         Collection<MultiMapRecord> coll = multiMapValue.getCollection(false);
         removed = new LinkedList<MultiMapRecord>();
         for (Long recordId : recordIds) {
@@ -79,17 +82,16 @@ public class TxnRemoveAllOperation extends MultiMapKeyBasedOperation implements 
             }
         }
         if (coll.isEmpty()) {
-            delete();
+            container.delete(dataKey);
         }
     }
 
     @Override
     public void afterRun() throws Exception {
-        long elapsed = Math.max(0, System.nanoTime() - startTimeNanos);
+        long elapsedNanos = Math.max(0, Timer.nanosElapsed(startTimeNanos));
         MultiMapService service = getService();
-        service.getLocalMultiMapStatsImpl(name).incrementRemoveLatencyNanos(elapsed);
+        service.getLocalMultiMapStatsImpl(name).incrementRemoveLatencyNanos(elapsedNanos);
         if (removed != null) {
-            getOrCreateContainer().update();
             for (MultiMapRecord record : removed) {
                 publishEvent(EntryEventType.REMOVED, dataKey, null, record.getObject());
             }
@@ -123,14 +125,14 @@ public class TxnRemoveAllOperation extends MultiMapKeyBasedOperation implements 
     protected void readInternal(ObjectDataInput in) throws IOException {
         super.readInternal(in);
         int size = in.readInt();
-        recordIds = new ArrayList<Long>();
+        recordIds = new ArrayList<>();
         for (int i = 0; i < size; i++) {
             recordIds.add(in.readLong());
         }
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.TXN_REMOVE_ALL;
     }
 }

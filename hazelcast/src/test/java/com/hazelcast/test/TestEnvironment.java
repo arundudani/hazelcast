@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,10 @@
 
 package com.hazelcast.test;
 
+import com.hazelcast.internal.cluster.Versions;
 import com.hazelcast.test.compatibility.SamplingSerializationService;
 
+@SuppressWarnings("WeakerAccess")
 public final class TestEnvironment {
 
     public static final String HAZELCAST_TEST_USE_NETWORK = "hazelcast.test.use.network";
@@ -45,7 +47,7 @@ public final class TestEnvironment {
      * @return {@code true} when compatibility tests are to be executed on a mixed version cluster
      */
     public static boolean isRunningCompatibilityTest() {
-        return Boolean.getBoolean(EXECUTE_COMPATIBILITY_TESTS);
+        return Boolean.getBoolean(EXECUTE_COMPATIBILITY_TESTS) && Versions.CURRENT_CLUSTER_VERSION.getMinor() > 0;
     }
 
     public static boolean isRecordingSerializedClassNames() {

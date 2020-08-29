@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,20 +20,20 @@ import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
 import com.hazelcast.multimap.impl.MultiMapRecord;
 import com.hazelcast.multimap.impl.MultiMapValue;
-import com.hazelcast.multimap.impl.operations.MultiMapKeyBasedOperation;
+import com.hazelcast.multimap.impl.operations.AbstractKeyBasedMultiMapOperation;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.BackupOperation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupOperation;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 
-public class TxnRemoveAllBackupOperation extends MultiMapKeyBasedOperation implements BackupOperation {
+public class TxnRemoveAllBackupOperation extends AbstractKeyBasedMultiMapOperation implements BackupOperation {
 
-    Collection<Long> recordIds;
+    private Collection<Long> recordIds;
 
     public TxnRemoveAllBackupOperation() {
     }
@@ -45,15 +45,15 @@ public class TxnRemoveAllBackupOperation extends MultiMapKeyBasedOperation imple
 
     @Override
     public void run() throws Exception {
-        MultiMapContainer container = getOrCreateContainer();
+        MultiMapContainer container = getOrCreateContainerWithoutAccess();
         MultiMapValue multiMapValue = container.getOrCreateMultiMapValue(dataKey);
-        response = true;
         for (Long recordId : recordIds) {
             if (!multiMapValue.containsRecordId(recordId)) {
                 response = false;
                 return;
             }
         }
+        response = true;
         Collection<MultiMapRecord> coll = multiMapValue.getCollection(false);
         for (Long recordId : recordIds) {
             Iterator<MultiMapRecord> iterator = coll.iterator();
@@ -66,7 +66,7 @@ public class TxnRemoveAllBackupOperation extends MultiMapKeyBasedOperation imple
             }
         }
         if (coll.isEmpty()) {
-            delete();
+            container.delete(dataKey);
         }
     }
 
@@ -90,7 +90,7 @@ public class TxnRemoveAllBackupOperation extends MultiMapKeyBasedOperation imple
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.TXN_REMOVE_ALL_BACKUP;
     }
 }

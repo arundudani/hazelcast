@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,13 +20,12 @@ import com.hazelcast.cache.impl.CacheService;
 import com.hazelcast.cache.impl.journal.CacheEventJournalSubscribeOperation;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.CacheEventJournalSubscribeCodec;
-import com.hazelcast.instance.Node;
-import com.hazelcast.internal.cluster.Versions;
-import com.hazelcast.journal.EventJournalInitialSubscriberState;
-import com.hazelcast.nio.Connection;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.journal.EventJournalInitialSubscriberState;
+import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.security.permission.ActionConstants;
 import com.hazelcast.security.permission.CachePermission;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 import java.security.Permission;
 
@@ -41,7 +40,7 @@ import java.security.Permission;
  * @since 3.9
  */
 public class CacheEventJournalSubscribeTask
-        extends AbstractCacheMessageTask<CacheEventJournalSubscribeCodec.RequestParameters> {
+        extends AbstractCacheMessageTask<String> {
 
     public CacheEventJournalSubscribeTask(ClientMessage clientMessage, Node node, Connection connection) {
         super(clientMessage, node, connection);
@@ -49,15 +48,11 @@ public class CacheEventJournalSubscribeTask
 
     @Override
     protected Operation prepareOperation() {
-        if (nodeEngine.getClusterService().getClusterVersion().isLessThan(Versions.V3_9)) {
-            throw new UnsupportedOperationException(
-                    "Event journal actions are available when cluster version is 3.9 or higher");
-        }
-        return new CacheEventJournalSubscribeOperation(parameters.name);
+        return new CacheEventJournalSubscribeOperation(parameters);
     }
 
     @Override
-    protected CacheEventJournalSubscribeCodec.RequestParameters decodeClientMessage(ClientMessage clientMessage) {
+    protected String decodeClientMessage(ClientMessage clientMessage) {
         return CacheEventJournalSubscribeCodec.decodeRequest(clientMessage);
     }
 
@@ -73,12 +68,12 @@ public class CacheEventJournalSubscribeTask
     }
 
     public Permission getRequiredPermission() {
-        return new CachePermission(parameters.name, ActionConstants.ACTION_LISTEN);
+        return new CachePermission(parameters, ActionConstants.ACTION_LISTEN);
     }
 
     @Override
     public String getDistributedObjectName() {
-        return parameters.name;
+        return parameters;
     }
 
     @Override

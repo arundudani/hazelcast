@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,18 +18,17 @@ package com.hazelcast.internal.serialization.impl;
 
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.nio.BufferObjectDataInput;
-import com.hazelcast.nio.BufferObjectDataOutput;
+import com.hazelcast.internal.nio.BufferObjectDataInput;
+import com.hazelcast.internal.nio.BufferObjectDataOutput;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.CustomSerializationTest;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.DataSerializable;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
 import com.hazelcast.nio.serialization.StreamSerializer;
 import com.hazelcast.nio.serialization.TypedDataSerializable;
 import com.hazelcast.test.HazelcastParallelClassRunner;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.hamcrest.core.Is;
 import org.hamcrest.core.IsInstanceOf;
@@ -50,7 +49,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class AbstractSerializationServiceTest {
 
     private AbstractSerializationService abstractSerializationService;
@@ -64,8 +63,10 @@ public class AbstractSerializationServiceTest {
     }
 
     protected AbstractSerializationService newAbstractSerializationService() {
-        DefaultSerializationServiceBuilder defaultSerializationServiceBuilder = new DefaultSerializationServiceBuilder();
-        return defaultSerializationServiceBuilder.setVersion(InternalSerializationService.VERSION_1).build();
+        return new DefaultSerializationServiceBuilder()
+                .setVersion(InternalSerializationService.VERSION_1)
+                .setNotActiveExceptionSupplier(HazelcastInstanceNotActiveException::new)
+                .build();
     }
 
     @Test
@@ -73,7 +74,7 @@ public class AbstractSerializationServiceTest {
         String payload = "somepayload";
         int padding = 10;
 
-        byte[] unpadded = abstractSerializationService.toBytes(payload);
+        byte[] unpadded = abstractSerializationService.toBytes(payload, 0, true);
         byte[] padded = abstractSerializationService.toBytes(payload, 10, true);
 
         // make sure the size is expected
@@ -287,30 +288,31 @@ public class AbstractSerializationServiceTest {
             if (this == obj) {
                 return true;
             }
-
             if (null == obj) {
                 return false;
             }
-
             if (null == obj || !(getClass().isAssignableFrom(obj.getClass()))) {
                 return false;
             }
 
             TypedBaseClass rhs = (TypedBaseClass) obj;
-
             if (null == innerObj && null != rhs.innerObj || null != innerObj && null == rhs.innerObj) {
                 return false;
             }
-
             if (null == innerObj && null == rhs.innerObj) {
                 return true;
             }
-
             return innerObj.equals(rhs.innerObj);
+        }
+
+        @Override
+        public int hashCode() {
+            return innerObj != null ? innerObj.hashCode() : 0;
         }
     }
 
     public static class BaseClass implements DataSerializable {
+
         private int intField;
         private String stringField;
 
@@ -328,15 +330,13 @@ public class AbstractSerializationServiceTest {
         }
 
         @Override
-        public void writeData(ObjectDataOutput out)
-                throws IOException {
+        public void writeData(ObjectDataOutput out) throws IOException {
             out.writeInt(intField);
             out.writeUTF(stringField);
         }
 
         @Override
-        public void readData(ObjectDataInput in)
-                throws IOException {
+        public void readData(ObjectDataInput in) throws IOException {
             intField = in.readInt();
             stringField = in.readUTF();
         }
@@ -351,12 +351,10 @@ public class AbstractSerializationServiceTest {
             }
 
             BaseClass baseClass = (BaseClass) o;
-
             if (intField != baseClass.intField) {
                 return false;
             }
             return stringField != null ? stringField.equals(baseClass.stringField) : baseClass.stringField == null;
-
         }
 
         @Override
@@ -368,6 +366,7 @@ public class AbstractSerializationServiceTest {
     }
 
     public static class ExtendedClass extends BaseClass {
+
         private long longField;
 
         public ExtendedClass() {
@@ -379,16 +378,14 @@ public class AbstractSerializationServiceTest {
         }
 
         @Override
-        public void writeData(ObjectDataOutput out)
-                throws IOException {
+        public void writeData(ObjectDataOutput out) throws IOException {
             super.writeData(out);
             out.writeLong(longField);
 
         }
 
         @Override
-        public void readData(ObjectDataInput in)
-                throws IOException {
+        public void readData(ObjectDataInput in) throws IOException {
             super.readData(in);
             longField = in.readLong();
         }
@@ -406,7 +403,6 @@ public class AbstractSerializationServiceTest {
             }
 
             ExtendedClass that = (ExtendedClass) o;
-
             return longField == that.longField;
 
         }
@@ -420,10 +416,11 @@ public class AbstractSerializationServiceTest {
     }
 
     private class StringBufferSerializer implements StreamSerializer<StringBuffer> {
+
         int typeId = 100000;
         private boolean fail;
 
-        public StringBufferSerializer(boolean fail) {
+        StringBufferSerializer(boolean fail) {
             this.fail = fail;
         }
 
@@ -434,7 +431,6 @@ public class AbstractSerializationServiceTest {
 
         @Override
         public void destroy() {
-
         }
 
         @Override
@@ -458,9 +454,8 @@ public class AbstractSerializationServiceTest {
 
     private class TheOtherGlobalSerializer extends StringBufferSerializer {
 
-        public TheOtherGlobalSerializer(boolean fail) {
+        TheOtherGlobalSerializer(boolean fail) {
             super(fail);
         }
     }
-
 }

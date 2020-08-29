@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,15 @@
 
 package com.hazelcast.internal.cluster.fd;
 
-import com.hazelcast.core.Member;
+import com.hazelcast.cluster.Member;
 import com.hazelcast.instance.BuildInfoProvider;
-import com.hazelcast.instance.MemberImpl;
-import com.hazelcast.nio.Address;
+import com.hazelcast.cluster.impl.MemberImpl;
+import com.hazelcast.cluster.Address;
 import com.hazelcast.spi.properties.HazelcastProperties;
-import com.hazelcast.test.HazelcastParametersRunnerFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
-import com.hazelcast.util.Clock;
+import com.hazelcast.internal.util.Clock;
 import com.hazelcast.version.MemberVersion;
 import org.junit.Before;
 import org.junit.Test;
@@ -39,7 +39,7 @@ import java.util.Collection;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
-import static com.hazelcast.util.UuidUtil.newUnsecureUuidString;
+import static com.hazelcast.internal.util.UuidUtil.newUnsecureUUID;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.lessThan;
 import static org.junit.Assert.assertEquals;
@@ -49,11 +49,11 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 @RunWith(Parameterized.class)
-@Parameterized.UseParametersRunnerFactory(HazelcastParametersRunnerFactory.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Parameterized.UseParametersRunnerFactory(HazelcastParallelParametersRunnerFactory.class)
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class ClusterFailureDetectorTest {
 
-    private static long HEARTBEAT_TIMEOUT = TimeUnit.SECONDS.toMillis(1);
+    private static final long HEARTBEAT_TIMEOUT = TimeUnit.SECONDS.toMillis(1);
 
     @Parameterized.Parameters(name = "fd:{0}")
     public static Collection<ClusterFailureDetectorType> parameters() {
@@ -81,13 +81,13 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void member_isNotAlive_whenNoHeartbeat() throws Exception {
+    public void member_isNotAlive_whenNoHeartbeat() {
         Member member = newMember(5000);
         assertFalse(failureDetector.isAlive(member, Clock.currentTimeMillis()));
     }
 
     @Test
-    public void member_isAlive_whenHeartbeat() throws Exception {
+    public void member_isAlive_whenHeartbeat() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -95,7 +95,7 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void member_isAlive_beforeHeartbeatTimeout() throws Exception {
+    public void member_isAlive_beforeHeartbeatTimeout() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -103,7 +103,7 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void member_isNotAlive_afterHeartbeatTimeout() throws Exception {
+    public void member_isNotAlive_afterHeartbeatTimeout() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -113,14 +113,14 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void lastHeartbeat_whenNoHeartbeat() throws Exception {
+    public void lastHeartbeat_whenNoHeartbeat() {
         Member member = newMember(5000);
         long lastHeartbeat = failureDetector.lastHeartbeat(member);
         assertEquals(0L, lastHeartbeat);
     }
 
     @Test
-    public void lastHeartbeat() throws Exception {
+    public void lastHeartbeat() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -130,7 +130,7 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void suspicionLevel_whenNoHeartbeat() throws Exception {
+    public void suspicionLevel_whenNoHeartbeat() {
         Member member = newMember(5000);
         double suspicionLevel = failureDetector.suspicionLevel(member, Clock.currentTimeMillis());
 
@@ -139,7 +139,7 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void suspicionLevel_whenHeartbeat() throws Exception {
+    public void suspicionLevel_whenHeartbeat() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -149,7 +149,7 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void suspicionLevel_beforeHeartbeatTimeout() throws Exception {
+    public void suspicionLevel_beforeHeartbeatTimeout() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -161,7 +161,7 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void suspicionLevel_afterHeartbeatTimeout() throws Exception {
+    public void suspicionLevel_afterHeartbeatTimeout() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -183,14 +183,14 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void remove_whenNoHeartbeat() throws Exception {
+    public void remove_whenNoHeartbeat() {
         Member member = newMember(5000);
         failureDetector.remove(member);
         assertFalse(failureDetector.isAlive(member, Clock.currentTimeMillis()));
     }
 
     @Test
-    public void remove_afterHeartbeat() throws Exception {
+    public void remove_afterHeartbeat() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -200,14 +200,14 @@ public class ClusterFailureDetectorTest {
     }
 
     @Test
-    public void reset_whenNoHeartbeat() throws Exception {
+    public void reset_whenNoHeartbeat() {
         Member member = newMember(5000);
         failureDetector.reset();
         assertFalse(failureDetector.isAlive(member, Clock.currentTimeMillis()));
     }
 
     @Test
-    public void reset_afterHeartbeat() throws Exception {
+    public void reset_afterHeartbeat() {
         Member member = newMember(5000);
         long timestamp = Clock.currentTimeMillis();
         failureDetector.heartbeat(member, timestamp);
@@ -218,7 +218,10 @@ public class ClusterFailureDetectorTest {
 
     private static Member newMember(int port) {
         MemberVersion memberVersion = MemberVersion.of(BuildInfoProvider.getBuildInfo().getVersion());
-        return new MemberImpl(newAddress(port), memberVersion, false, newUnsecureUuidString());
+        return new MemberImpl.Builder(newAddress(port))
+                .version(memberVersion)
+                .uuid(newUnsecureUUID())
+                .build();
     }
 
     private static Address newAddress(int port) {

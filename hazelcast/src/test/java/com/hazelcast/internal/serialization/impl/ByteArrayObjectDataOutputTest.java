@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@
 package com.hazelcast.internal.serialization.impl;
 
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.nio.Bits;
+import com.hazelcast.internal.nio.Bits;
 import com.hazelcast.test.HazelcastParallelClassRunner;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.After;
 import org.junit.Before;
@@ -27,6 +27,7 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.IOException;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 
@@ -43,13 +44,13 @@ import static org.mockito.Mockito.verify;
  * ByteArrayObjectDataOutput Tester.
  */
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class ByteArrayObjectDataOutputTest {
 
     private InternalSerializationService mockSerializationService;
     private ByteArrayObjectDataOutput out;
 
-    private static byte[] TEST_DATA = new byte[]{1, 2, 3};
+    private static final byte[] TEST_DATA = new byte[]{1, 2, 3};
 
     @Before
     public void before() {
@@ -91,6 +92,11 @@ public class ByteArrayObjectDataOutputTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testWriteForBOffLen_OffLenHigherThenSize() {
         out.write(TEST_DATA, 0, -3);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testWrite_whenBufferIsNull() {
+        out.write(null, 0, 0);
     }
 
     @Test
@@ -287,6 +293,15 @@ public class ByteArrayObjectDataOutputTest {
         short actual = Bits.readShortL(out.buffer, 2);
 
         assertEquals(actual, expected);
+    }
+
+    @Test
+    public void testWriteShortForPositionVAndByteOrder() throws IOException {
+        short expected = 42;
+        out.pos = 2;
+        out.writeShort(42, LITTLE_ENDIAN);
+        short actual = Bits.readShortL(out.buffer, 2);
+        assertEquals(expected, actual);
     }
 
     @Test

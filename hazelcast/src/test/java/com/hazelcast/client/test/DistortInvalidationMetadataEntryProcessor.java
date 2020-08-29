@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,10 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastInstanceAware;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.core.Offloadable;
-import com.hazelcast.instance.TestUtil;
 import com.hazelcast.internal.nearcache.impl.invalidation.Invalidator;
 import com.hazelcast.internal.nearcache.impl.invalidation.MetaDataGenerator;
 import com.hazelcast.internal.partition.InternalPartitionService;
-import com.hazelcast.map.AbstractEntryProcessor;
+import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.impl.MapService;
 import com.hazelcast.map.impl.MapServiceContext;
 import com.hazelcast.map.impl.nearcache.MapNearCacheManager;
@@ -32,7 +31,7 @@ import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 import com.hazelcast.spi.impl.NodeEngineImpl;
-import com.hazelcast.util.UuidUtil;
+import com.hazelcast.internal.util.UuidUtil;
 
 import java.io.IOException;
 import java.util.Map;
@@ -40,12 +39,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.hazelcast.map.impl.MapService.SERVICE_NAME;
-import static com.hazelcast.util.RandomPicker.getInt;
+import static com.hazelcast.test.Accessors.getNodeEngineImpl;
+import static com.hazelcast.internal.util.RandomPicker.getInt;
 import static java.lang.Integer.MAX_VALUE;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-public class DistortInvalidationMetadataEntryProcessor extends AbstractEntryProcessor<Integer, Integer> implements IdentifiedDataSerializable, HazelcastInstanceAware, Offloadable {
+public class DistortInvalidationMetadataEntryProcessor
+        implements EntryProcessor<Integer, Integer, Object>, IdentifiedDataSerializable, HazelcastInstanceAware, Offloadable {
 
     static final int CLASS_ID = 3;
 
@@ -62,39 +63,31 @@ public class DistortInvalidationMetadataEntryProcessor extends AbstractEntryProc
         final HazelcastInstance instance = this.instance;
         final AtomicBoolean stopTest = new AtomicBoolean();
 
-        Thread distortSequence = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                while (!stopTest.get()) {
-                    distortRandomPartitionSequence(mapName, instance);
-                    sleepSeconds(1);
-                }
+        Thread distortSequence = new Thread(() -> {
+            while (!stopTest.get()) {
+                distortRandomPartitionSequence(mapName, instance);
+                sleepSeconds(1);
             }
         });
 
-        Thread distortUuid = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                while (!stopTest.get()) {
-                    distortRandomPartitionUuid(instance);
-                    sleepSeconds(5);
-                }
+        Thread distortUuid = new Thread(() -> {
+            while (!stopTest.get()) {
+                distortRandomPartitionUuid(instance);
+                sleepSeconds(5);
             }
         });
 
-        Thread put = new Thread(new Runnable() {
-            public void run() {
-                // change some data
-                while (!stopTest.get()) {
-                    try {
-                        int key = getInt(mapSize);
-                        int value = getInt(Integer.MAX_VALUE);
-                        Map<Integer, Integer> map = instance.getMap(mapName);
-                        int oldValue = map.put(key, value);
-                        sleepAtLeastMillis(100);
-                    } catch (HazelcastInstanceNotActiveException e) {
-                        break;
-                    }
+        Thread put = new Thread(() -> {
+            // change some data
+            while (!stopTest.get()) {
+                try {
+                    int key = getInt(mapSize);
+                    int value = getInt(Integer.MAX_VALUE);
+                    Map<Integer, Integer> map = instance.getMap(mapName);
+                    int oldValue = map.put(key, value);
+                    sleepAtLeastMillis(100);
+                } catch (HazelcastInstanceNotActiveException e) {
+                    break;
                 }
             }
         });
@@ -121,7 +114,7 @@ public class DistortInvalidationMetadataEntryProcessor extends AbstractEntryProc
     }
 
     private void distortRandomPartitionSequence(String mapName, HazelcastInstance member) {
-        NodeEngineImpl nodeEngineImpl = TestUtil.getNode(member).nodeEngine;
+        NodeEngineImpl nodeEngineImpl = getNodeEngineImpl(member);
         MapService mapService = nodeEngineImpl.getService(SERVICE_NAME);
         MapServiceContext mapServiceContext = mapService.getMapServiceContext();
         MapNearCacheManager mapNearCacheManager = mapServiceContext.getMapNearCacheManager();
@@ -133,7 +126,7 @@ public class DistortInvalidationMetadataEntryProcessor extends AbstractEntryProc
     }
 
     private void distortRandomPartitionUuid(HazelcastInstance member) {
-        NodeEngineImpl nodeEngineImpl = TestUtil.getNode(member).nodeEngine;
+        NodeEngineImpl nodeEngineImpl = getNodeEngineImpl(member);
         int partitionCount = nodeEngineImpl.getPartitionService().getPartitionCount();
         int partitionId = getInt(partitionCount);
         MapService mapService = nodeEngineImpl.getService(SERVICE_NAME);
@@ -180,7 +173,7 @@ public class DistortInvalidationMetadataEntryProcessor extends AbstractEntryProc
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CLASS_ID;
     }
 

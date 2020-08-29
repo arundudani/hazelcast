@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ package com.hazelcast.ringbuffer.impl;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.RingbufferConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.ringbuffer.StaleSequenceException;
 import com.hazelcast.spi.impl.NodeEngineImpl;
-import com.hazelcast.spi.serialization.SerializationService;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.annotation.QuickTest;
@@ -31,6 +31,8 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import static com.hazelcast.test.Accessors.getNodeEngineImpl;
+import static com.hazelcast.test.Accessors.getSerializationService;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -68,8 +70,8 @@ public class RingbufferContainerTest extends HazelcastTestSupport {
         assertSame(config, container.getConfig());
 
         ArrayRingbuffer ringbuffer = (ArrayRingbuffer) container.getRingbuffer();
-        assertNotNull(ringbuffer.ringItems);
-        assertEquals(config.getCapacity(), ringbuffer.ringItems.length);
+        assertNotNull(ringbuffer.getItems());
+        assertEquals(config.getCapacity(), ringbuffer.getItems().length);
         assertEquals(-1, ringbuffer.tailSequence());
         assertEquals(0, ringbuffer.headSequence());
     }
@@ -216,7 +218,7 @@ public class RingbufferContainerTest extends HazelcastTestSupport {
         ArrayRingbuffer ringbuffer = (ArrayRingbuffer) container.getRingbuffer();
 
         container.add(toData("foo"));
-        assertInstanceOf(Data.class, ringbuffer.ringItems[0]);
+        assertInstanceOf(Data.class, ringbuffer.getItems()[0]);
     }
 
     @Test
@@ -226,10 +228,10 @@ public class RingbufferContainerTest extends HazelcastTestSupport {
         ArrayRingbuffer ringbuffer = (ArrayRingbuffer) container.getRingbuffer();
 
         container.add("foo");
-        assertInstanceOf(String.class, ringbuffer.ringItems[0]);
+        assertInstanceOf(String.class, ringbuffer.getItems()[0]);
 
         container.add(toData("bar"));
-        assertInstanceOf(String.class, ringbuffer.ringItems[1]);
+        assertInstanceOf(String.class, ringbuffer.getItems()[1]);
     }
 
     private <K, V> RingbufferContainer<K, V> getRingbufferContainer(RingbufferConfig config) {

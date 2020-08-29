@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,9 @@ import static com.hazelcast.query.impl.extractor.AbstractExtractionSpecification
  * limbs_list & limbs_array, so that both extraction in arrays and in collections may be tested.
  */
 public class ComplexTestDataStructure {
+
+    private ComplexTestDataStructure() {
+    }
 
     public static class Person implements Serializable, PortableAware {
         String name;

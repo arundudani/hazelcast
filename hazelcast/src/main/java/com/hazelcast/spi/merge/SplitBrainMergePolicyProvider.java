@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,16 @@
 package com.hazelcast.spi.merge;
 
 import com.hazelcast.config.InvalidConfigurationException;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.util.ConstructorFunction;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.internal.util.ConstructorFunction;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import static com.hazelcast.nio.ClassLoaderUtil.newInstance;
-import static com.hazelcast.util.ConcurrencyUtil.getOrPutIfAbsent;
+import static com.hazelcast.internal.nio.ClassLoaderUtil.newInstance;
+import static com.hazelcast.internal.util.ConcurrencyUtil.getOrPutIfAbsent;
 
 /**
  * A provider for {@link SplitBrainMergePolicy} instances.
@@ -41,8 +40,9 @@ public final class SplitBrainMergePolicyProvider {
     private static final Map<String, SplitBrainMergePolicy> OUT_OF_THE_BOX_MERGE_POLICIES;
 
     static {
-        OUT_OF_THE_BOX_MERGE_POLICIES = new HashMap<String, SplitBrainMergePolicy>();
+        OUT_OF_THE_BOX_MERGE_POLICIES = new HashMap<>();
         addPolicy(DiscardMergePolicy.class, new DiscardMergePolicy());
+        addPolicy(ExpirationTimeMergePolicy.class, new ExpirationTimeMergePolicy());
         addPolicy(HigherHitsMergePolicy.class, new HigherHitsMergePolicy());
         addPolicy(HyperLogLogMergePolicy.class, new HyperLogLogMergePolicy());
         addPolicy(LatestAccessMergePolicy.class, new LatestAccessMergePolicy());

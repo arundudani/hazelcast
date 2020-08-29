@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,40 +16,39 @@
 
 package com.hazelcast.console;
 
+import com.hazelcast.cluster.Member;
+import com.hazelcast.collection.IList;
+import com.hazelcast.collection.IQueue;
+import com.hazelcast.collection.ISet;
+import com.hazelcast.collection.ItemEvent;
+import com.hazelcast.collection.ItemListener;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.ExecutorConfig;
-import com.hazelcast.config.FileSystemXmlConfig;
 import com.hazelcast.core.DistributedObject;
 import com.hazelcast.core.EntryEvent;
 import com.hazelcast.core.EntryListener;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.IAtomicLong;
 import com.hazelcast.core.IExecutorService;
-import com.hazelcast.core.IList;
-import com.hazelcast.core.IMap;
-import com.hazelcast.core.IQueue;
-import com.hazelcast.core.ISet;
-import com.hazelcast.core.ITopic;
-import com.hazelcast.core.ItemEvent;
-import com.hazelcast.core.ItemListener;
-import com.hazelcast.core.MapEvent;
-import com.hazelcast.core.Member;
-import com.hazelcast.core.Message;
-import com.hazelcast.core.MessageListener;
-import com.hazelcast.core.MultiMap;
-import com.hazelcast.core.Partition;
+import com.hazelcast.cp.IAtomicLong;
+import com.hazelcast.internal.nio.IOUtil;
+import com.hazelcast.internal.util.Clock;
 import com.hazelcast.internal.util.RuntimeAvailableProcessors;
-import com.hazelcast.util.Clock;
-
+import com.hazelcast.map.IMap;
+import com.hazelcast.map.MapEvent;
+import com.hazelcast.multimap.MultiMap;
+import com.hazelcast.partition.Partition;
+import com.hazelcast.topic.ITopic;
+import com.hazelcast.topic.Message;
+import com.hazelcast.topic.MessageListener;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
+import java.io.FileInputStream;
+import java.io.File;
+import java.io.BufferedReader;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.util.Collection;
 import java.util.HashMap;
@@ -67,12 +66,14 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.StringUtil.equalsIgnoreCase;
+import static com.hazelcast.internal.util.StringUtil.lowerCaseInternal;
+import static com.hazelcast.internal.util.StringUtil.trim;
 import static com.hazelcast.memory.MemoryUnit.BYTES;
-import static com.hazelcast.util.MapUtil.createHashMap;
-import static com.hazelcast.util.StringUtil.equalsIgnoreCase;
-import static com.hazelcast.util.StringUtil.lowerCaseInternal;
-import static com.hazelcast.util.StringUtil.trim;
 import static java.lang.String.format;
+import static java.lang.Thread.currentThread;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 /**
@@ -97,12 +98,15 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
     private boolean silent;
     private boolean echo;
 
-    private volatile HazelcastInstance hazelcast;
     private volatile LineReader lineReader;
     private volatile boolean running;
 
-    public ConsoleApp(HazelcastInstance hazelcast) {
+    private final PrintStream outOrig;
+    private final HazelcastInstance hazelcast;
+
+    public ConsoleApp(HazelcastInstance hazelcast, PrintStream outOrig) {
         this.hazelcast = hazelcast;
+        this.outOrig = outOrig;
     }
 
     public IQueue<Object> getQueue() {
@@ -126,7 +130,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
     }
 
     public IAtomicLong getAtomicNumber() {
-        atomicNumber = hazelcast.getAtomicLong(namespace);
+        atomicNumber = hazelcast.getCPSubsystem().getAtomicLong(namespace);
         return atomicNumber;
     }
 
@@ -138,15 +142,6 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
     public IList<Object> getList() {
         list = hazelcast.getList(namespace);
         return list;
-    }
-
-    public void setHazelcast(HazelcastInstance hazelcast) {
-        this.hazelcast = hazelcast;
-        map = null;
-        list = null;
-        set = null;
-        queue = null;
-        topic = null;
     }
 
     public void stop() {
@@ -234,19 +229,16 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             ExecutorService pool = Executors.newFixedThreadPool(fork);
             for (int i = 0; i < fork; i++) {
                 final int threadID = i;
-                pool.submit(new Runnable() {
-                    @Override
-                    public void run() {
-                        String command = threadCommand;
-                        String[] threadArgs = trim(command.replaceAll("\\$t", "" + threadID)).split(" ");
-                        // TODO &t #4 m.putmany x k
-                        if ("m.putmany".equals(threadArgs[0]) || "m.removemany".equals(threadArgs[0])) {
-                            if (threadArgs.length < 4) {
-                                command += " " + Integer.parseInt(threadArgs[1]) * threadID;
-                            }
+                pool.submit(() -> {
+                    String sanitizedCommand = threadCommand;
+                    String[] threadArgs = trim(sanitizedCommand.replaceAll("\\$t", "" + threadID)).split(" ");
+                    // TODO &t #4 m.putmany x k
+                    if ("m.putmany".equals(threadArgs[0]) || "m.removemany".equals(threadArgs[0])) {
+                        if (threadArgs.length < 4) {
+                            sanitizedCommand += " " + Integer.parseInt(threadArgs[1]) * threadID;
                         }
-                        handleCommand(command);
                     }
+                    handleCommand(sanitizedCommand);
                 });
             }
             pool.shutdown();
@@ -358,8 +350,6 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             handleAddListener(args);
         } else if (first.equals("m.removeMapListener")) {
             handleRemoveListener(args);
-        } else if (first.equals("m.unlock")) {
-            handleMapUnlock(args);
         } else if (first.equals("mm.put")) {
             handleMultiMapPut(args);
         } else if (first.equals("mm.get")) {
@@ -438,8 +428,8 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
         long startMs = System.currentTimeMillis();
 
         IExecutorService executor = hazelcast.getExecutorService(EXECUTOR_NAMESPACE + " " + threadCount);
-        List<Future> futures = new LinkedList<Future>();
-        List<Member> members = new LinkedList<Member>(hazelcast.getCluster().getMembers());
+        List<Future> futures = new LinkedList<>();
+        List<Member> members = new LinkedList<>(hazelcast.getCluster().getMembers());
 
         int totalThreadCount = hazelcast.getCluster().getMembers().size() * threadCount;
 
@@ -448,7 +438,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             Member member = members.get(i % members.size());
             if (taskCount % totalThreadCount == 0) {
                 latchId = taskCount / totalThreadCount;
-                hazelcast.getCountDownLatch("latch" + latchId).trySetCount(totalThreadCount);
+                hazelcast.getCPSubsystem().getCountDownLatch("latch" + latchId).trySetCount(totalThreadCount);
 
             }
             Future f = executor.submitToMember(new SimulateLoadTask(durationSec, i + 1, "latch" + latchId), member);
@@ -459,6 +449,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             try {
                 f.get();
             } catch (InterruptedException e) {
+                currentThread().interrupt();
                 e.printStackTrace();
             } catch (ExecutionException e) {
                 e.printStackTrace();
@@ -484,16 +475,18 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
         File f = new File(first.substring(1));
         println("Executing script file " + f.getAbsolutePath());
         if (f.exists()) {
+            BufferedReader br = null;
             try {
-                BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+                br = new BufferedReader(new InputStreamReader(new FileInputStream(f), UTF_8));
                 String l = br.readLine();
                 while (l != null) {
                     handleCommand(l);
                     l = br.readLine();
                 }
-                br.close();
             } catch (IOException e) {
                 e.printStackTrace();
+            } finally {
+                IOUtil.closeResource(br);
             }
         } else {
             println("File not found! " + f.getAbsolutePath());
@@ -576,7 +569,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
 
     protected void handlePartitions(String[] args) {
         Set<Partition> partitions = hazelcast.getPartitionService().getPartitions();
-        Map<Member, Integer> partitionCounts = new HashMap<Member, Integer>();
+        Map<Member, Integer> partitionCounts = new HashMap<>();
         for (Partition partition : partitions) {
             Member owner = partition.getOwner();
             if (owner != null) {
@@ -609,15 +602,10 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
     }
 
     protected void handleListRemove(String[] args) {
-        int index;
         try {
-            index = Integer.parseInt(args[1]);
-        } catch (NumberFormatException e) {
-            throw new RuntimeException(e);
-        }
-        if (index >= 0) {
+            int index = Integer.parseInt(args[1]);
             println(getList().remove(index));
-        } else {
+        } catch (NumberFormatException e) {
             println(getList().remove(args[1]));
         }
     }
@@ -673,8 +661,9 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
 
     protected void handleMapPutAsync(String[] args) {
         try {
-            println(getMap().putAsync(args[1], args[2]).get());
+            println(getMap().putAsync(args[1], args[2]).toCompletableFuture().get());
         } catch (InterruptedException e) {
+            currentThread().interrupt();
             e.printStackTrace();
         } catch (ExecutionException e) {
             e.printStackTrace();
@@ -695,8 +684,9 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
 
     protected void handleMapGetAsync(String[] args) {
         try {
-            println(getMap().getAsync(args[1]).get());
+            println(getMap().getAsync(args[1]).toCompletableFuture().get());
         } catch (InterruptedException e) {
+            currentThread().interrupt();
             e.printStackTrace();
         } catch (ExecutionException e) {
             e.printStackTrace();
@@ -794,6 +784,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             try {
                 locked = getMap().tryLock(key, time, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
+                currentThread().interrupt();
                 locked = false;
             }
         }
@@ -917,6 +908,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             try {
                 locked = getMultiMap().tryLock(key, time, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
+                currentThread().interrupt();
                 locked = false;
             }
         }
@@ -941,11 +933,12 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
         }
     }
 
-    @java.lang.SuppressWarnings("LockAcquiredButNotSafelyReleased")
+    // squid:S2222 suppression avoids sonar analysis bug regarding already known lock release issue
+    @SuppressWarnings({"LockAcquiredButNotSafelyReleased", "squid:S2222"})
     protected void handleLock(String[] args) {
         String lockStr = args[0];
         String key = args[1];
-        Lock lock = hazelcast.getLock(key);
+        Lock lock = hazelcast.getCPSubsystem().getLock(key);
         if (equalsIgnoreCase(lockStr, "lock")) {
             lock.lock();
             println("true");
@@ -961,6 +954,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
                 try {
                     println(lock.tryLock(time, TimeUnit.SECONDS));
                 } catch (InterruptedException e) {
+                    currentThread().interrupt();
                     e.printStackTrace();
                 }
             }
@@ -1171,6 +1165,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             boolean offered = getQueue().offer(args[1], timeout, TimeUnit.SECONDS);
             println(offered);
         } catch (InterruptedException e) {
+            currentThread().interrupt();
             e.printStackTrace();
         }
     }
@@ -1179,6 +1174,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
         try {
             println(getQueue().take());
         } catch (InterruptedException e) {
+            currentThread().interrupt();
             e.printStackTrace();
         }
     }
@@ -1191,6 +1187,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
         try {
             println(getQueue().poll(timeout, TimeUnit.SECONDS));
         } catch (InterruptedException e) {
+            currentThread().interrupt();
             e.printStackTrace();
         }
     }
@@ -1278,7 +1275,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
                 future = executorService.submitToKeyOwner(callable, key);
             } else if (onMember) {
                 int memberIndex = Integer.parseInt(args[2]);
-                List<Member> members = new LinkedList<Member>(hazelcast.getCluster().getMembers());
+                List<Member> members = new LinkedList<>(hazelcast.getCluster().getMembers());
                 if (memberIndex >= members.size()) {
                     throw new IndexOutOfBoundsException("Member index: " + memberIndex + " must be smaller than "
                             + members.size());
@@ -1290,6 +1287,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
             }
             println("Result: " + future.get());
         } catch (InterruptedException e) {
+            currentThread().interrupt();
             e.printStackTrace();
         } catch (ExecutionException e) {
             e.printStackTrace();
@@ -1307,6 +1305,7 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
                 println(f.get());
             }
         } catch (InterruptedException e) {
+            currentThread().interrupt();
             e.printStackTrace();
         } catch (ExecutionException e) {
             e.printStackTrace();
@@ -1330,6 +1329,11 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
 
     @Override
     public void entryEvicted(EntryEvent event) {
+        println(event);
+    }
+
+    @Override
+    public void entryExpired(EntryEvent<Object, Object> event) {
         println(event);
     }
 
@@ -1393,8 +1397,8 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
         println("jvm                                  //displays info about the runtime");
         println("who                                  //displays info about the cluster");
         println("whoami                               //displays info about this cluster member");
-        println("ns <string>                          //switch the namespace for using the distributed queue/map/set/list "
-                + "<string> (defaults to \"default\"");
+        println("ns <string>                          //switch the namespace for using the distributed data structure name "
+                + " <string> (e.g. queue/map/set/list name; defaults to \"default\")");
         println("@<file>                              //executes the given <file> script. Use '//' for comments in the script");
         println("");
     }
@@ -1426,10 +1430,10 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
 
     private void printLockCommands() {
         println("-- Lock commands");
-        println("lock <key>                           //same as Hazelcast.getLock(key).lock()");
-        println("tryLock <key>                        //same as Hazelcast.getLock(key).tryLock()");
+        println("lock <key>                           //same as Hazelcast.getCPSubsystem().getLock(key).lock()");
+        println("tryLock <key>                        //same as Hazelcast.getCPSubsystem().getLock(key).tryLock()");
         println("tryLock <key> <time>                 //same as tryLock <key> with timeout in seconds");
-        println("unlock <key>                         //same as Hazelcast.getLock(key).unlock()");
+        println("unlock <key>                         //same as Hazelcast.getCPSubsystem().getLock(key).unlock()");
         println("");
     }
 
@@ -1482,68 +1486,67 @@ public class ConsoleApp implements EntryListener<Object, Object>, ItemListener<O
 
     private void printExecutorServiceCommands() {
         println("-- Executor Service commands:");
-        println("execute <echo-input>                            //executes an echo task on random member");
-        println("executeOnKey <echo-input> <key>                  //executes an echo task on the member that owns the given key");
-        println("executeOnMember <echo-input> <memberIndex>         //executes an echo task on the member with given index");
-        println("executeOnMembers <echo-input>                      //executes an echo task on all of the members");
-        println("e<threadcount>.simulateLoad <task-count> <delaySeconds>        //simulates load on executor with given number "
+        println("execute <echo-input>                                     //executes an echo task on random member");
+        println("executeOnKey <echo-input> <key>                          //executes an echo task on the member that owns "
+                + "the given key");
+        println("executeOnMember <echo-input> <memberIndex>               //executes an echo task on the member "
+                + "with given index");
+        println("executeOnMembers <echo-input>                            //executes an echo task on all of the members");
+        println("e<threadcount>.simulateLoad <task-count> <delaySeconds>  //simulates load on executor with given number "
                 + "of thread (e1..e16)");
-
         println("");
     }
 
     private void printAtomicLongCommands() {
         println("-- IAtomicLong commands:");
-        println("a.get");
-        println("a.set <long>");
-        println("a.inc");
-        println("a.dec");
-        print("");
+        println("a.get                                 //returns the value of the atomic long");
+        println("a.set <long>                          //sets a value to the atomic long");
+        println("a.inc                                 //increments the value of the atomic long by one");
+        println("a.dec                                 //decrements the value of the atomic long by one");
+        println("");
     }
 
     private void printListCommands() {
         println("-- List commands:");
-        println("l.add <string>");
-        println("l.add <index> <string>");
-        println("l.contains <string>");
-        println("l.remove <string>");
-        println("l.remove <index>");
-        println("l.set <index> <string>");
-        println("l.iterator [remove]");
-        println("l.size");
-        println("l.clear");
-        print("");
+        println("l.add <string>                        //adds a string object to the list");
+        println("l.add <index> <string>                //adds a string object as an item with given index in the list");
+        println("l.contains <string>                   //checks if the list contains a string object");
+        println("l.remove <string>                     //removes a string object from the list");
+        println("l.remove <index>                      //removes the item with given index from the list");
+        println("l.set <index> <string>                //sets a string object to the item with given index in the list");
+        println("l.iterator [remove]                   //iterates the list, remove if specified");
+        println("l.size                                //size of the list");
+        println("l.clear                               //clears the list");
+        println("");
     }
 
     public void println(Object obj) {
         if (!silent) {
-            System.out.println(obj);
+            outOrig.println(obj);
         }
     }
 
     public void print(Object obj) {
         if (!silent) {
-            System.out.print(obj);
+            outOrig.print(obj);
         }
     }
 
     /**
      * Starts the test application.
+     * <p>
+     * It loads the Hazelcast member configuration using the resolution logic as described in
+     * {@link com.hazelcast.core.Hazelcast#newHazelcastInstance()}.
      *
-     * Loads the config from classpath hazelcast.xml, if it fails to load, will use default config.
+     * @throws Exception in case of any exceptional case
      */
     public static void main(String[] args) throws Exception {
-        Config config;
-        try {
-            config = new FileSystemXmlConfig("hazelcast.xml");
-        } catch (FileNotFoundException e) {
-            config = new Config();
-        }
+        Config config = Config.load();
         for (int i = 1; i <= LOAD_EXECUTORS_COUNT; i++) {
             config.addExecutorConfig(new ExecutorConfig(EXECUTOR_NAMESPACE + " " + i).setPoolSize(i));
         }
 
-        ConsoleApp consoleApp = new ConsoleApp(Hazelcast.newHazelcastInstance(config));
+        ConsoleApp consoleApp = new ConsoleApp(Hazelcast.newHazelcastInstance(config), System.out);
         consoleApp.start();
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package com.hazelcast.console;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * A {@link LineReader} implemetation.
@@ -28,7 +29,7 @@ class DefaultLineReader implements LineReader {
     private BufferedReader in;
 
     DefaultLineReader() throws UnsupportedEncodingException {
-        in = new BufferedReader(new InputStreamReader(System.in, "UTF-8"));
+        in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
     }
 
     @Override

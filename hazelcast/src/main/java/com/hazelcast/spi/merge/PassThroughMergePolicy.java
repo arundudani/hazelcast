@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,28 +16,31 @@
 
 package com.hazelcast.spi.merge;
 
+import com.hazelcast.spi.impl.merge.AbstractSplitBrainMergePolicy;
 import com.hazelcast.spi.impl.merge.SplitBrainDataSerializerHook;
 
 /**
  * Merges data structure entries from source to destination directly unless the merging entry is {@code null}.
  *
+ * @param <V> the type of the merged value
+ * @param <T> the type of the merging value
  * @since 3.10
  */
-public class PassThroughMergePolicy extends AbstractSplitBrainMergePolicy {
+public class PassThroughMergePolicy<V, T extends MergingValue<V>> extends AbstractSplitBrainMergePolicy<V, T, Object> {
 
     public PassThroughMergePolicy() {
     }
 
     @Override
-    public <V> V merge(MergingValueHolder<V> mergingValue, MergingValueHolder<V> existingValue) {
+    public Object merge(T mergingValue, T existingValue) {
         if (mergingValue == null) {
-            return existingValue.getValue();
+            return existingValue.getRawValue();
         }
-        return mergingValue.getValue();
+        return mergingValue.getRawValue();
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return SplitBrainDataSerializerHook.PASS_THROUGH;
     }
 }

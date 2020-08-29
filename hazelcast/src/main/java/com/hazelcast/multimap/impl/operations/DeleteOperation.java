@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,13 @@ package com.hazelcast.multimap.impl.operations;
 
 import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 
-public class DeleteOperation extends MultiMapBackupAwareOperation {
+public class DeleteOperation extends AbstractBackupAwareMultiMapOperation {
 
-    private boolean shouldBackup;
+    private transient boolean shouldBackup;
 
     public DeleteOperation() {
     }
@@ -35,13 +35,11 @@ public class DeleteOperation extends MultiMapBackupAwareOperation {
 
     @Override
     public void run() throws Exception {
-        delete();
+        MultiMapContainer container = getOrCreateContainer();
+        if (container.delete(dataKey)) {
+            container.update();
+        }
         shouldBackup = true;
-    }
-
-    @Override
-    public void afterRun() throws Exception {
-       super.afterRun();
     }
 
     @Override
@@ -69,7 +67,7 @@ public class DeleteOperation extends MultiMapBackupAwareOperation {
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.DELETE;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,15 +22,13 @@ import java.io.IOException;
 import java.util.Set;
 
 /**
- * Provides a mean of reading portable fields from a binary in form of java primitives
+ * Provides means for reading portable fields from binary data in the form of java primitives,
  * arrays of java primitives, nested portable fields and array of portable fields.
- * <p/>
- * PortableReader read method family support nested paths. For example <code>body.brain.iq</code> is a valid nested path.
  */
 public interface PortableReader {
 
     /**
-     * @return version global version of portable classes
+     * @return global version of portable classes
      */
     int getVersion();
 
@@ -60,151 +58,152 @@ public interface PortableReader {
     /**
      * @param fieldName name of the field
      * @return the int value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     int readInt(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the long value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     long readLong(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the utf string value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     String readUTF(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the boolean value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     boolean readBoolean(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the byte value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     byte readByte(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the char value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     char readChar(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the double value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     double readDouble(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the float value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     float readFloat(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the short value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     short readShort(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
+     * @param <P>       the type of the portable read
      * @return the portable value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     <P extends Portable> P readPortable(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the byte array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     byte[] readByteArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the boolean array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     boolean[] readBooleanArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the char array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     char[] readCharArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the int array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     int[] readIntArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the long array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     long[] readLongArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the double array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     double[] readDoubleArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the float array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     float[] readFloatArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the short array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     short[] readShortArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the String array value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     String[] readUTFArray(String fieldName) throws IOException;
 
     /**
      * @param fieldName name of the field
      * @return the portable value read
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     Portable[] readPortableArray(String fieldName) throws IOException;
 
     /**
      * {@link PortableWriter#getRawDataOutput()}.
-     * <p/>
-     * Note that portable fields can not read after getRawDataInput() is called. In case this happens,
-     * IOException will be thrown.
+     * <p>
+     * Note that portable fields can not be read after this method is called. If this happens,
+     * an IOException will be thrown.
      *
      * @return rawDataInput
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     ObjectDataInput getRawDataInput() throws IOException;
 }

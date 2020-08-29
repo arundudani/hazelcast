@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ package com.hazelcast.ringbuffer.impl.operations;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.RingbufferConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.ringbuffer.OverflowPolicy;
 import com.hazelcast.ringbuffer.Ringbuffer;
 import com.hazelcast.ringbuffer.impl.RingbufferService;
 import com.hazelcast.spi.impl.NodeEngineImpl;
-import com.hazelcast.spi.serialization.SerializationService;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.annotation.QuickTest;
@@ -35,6 +35,8 @@ import org.junit.runner.RunWith;
 
 import static com.hazelcast.ringbuffer.OverflowPolicy.FAIL;
 import static com.hazelcast.ringbuffer.OverflowPolicy.OVERWRITE;
+import static com.hazelcast.test.Accessors.getNodeEngineImpl;
+import static com.hazelcast.test.Accessors.getSerializationService;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -43,7 +45,6 @@ import static org.junit.Assert.assertTrue;
 @Category(QuickTest.class)
 public class AddAllOperationTest extends HazelcastTestSupport {
 
-    private HazelcastInstance hz;
     private NodeEngineImpl nodeEngine;
     private SerializationService serializationService;
     private Ringbuffer<Object> ringbuffer;
@@ -55,7 +56,7 @@ public class AddAllOperationTest extends HazelcastTestSupport {
 
         Config config = new Config().addRingBufferConfig(rbConfig);
 
-        hz = createHazelcastInstance(config);
+        HazelcastInstance hz = createHazelcastInstance(config);
         nodeEngine = getNodeEngineImpl(hz);
         serializationService = getSerializationService(hz);
         ringbuffer = hz.getRingbuffer(rbConfig.getName());

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,7 @@ package com.hazelcast.spi.discovery.impl;
 import com.hazelcast.config.DiscoveryConfig;
 import com.hazelcast.config.DiscoveryStrategyConfig;
 import com.hazelcast.config.InvalidConfigurationException;
-import com.hazelcast.config.properties.PropertyDefinition;
 import com.hazelcast.config.properties.ValidationException;
-import com.hazelcast.config.properties.ValueValidator;
-import com.hazelcast.core.HazelcastException;
-import com.hazelcast.core.TypeConverter;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.spi.discovery.DiscoveryNode;
 import com.hazelcast.spi.discovery.DiscoveryStrategy;
@@ -31,7 +27,7 @@ import com.hazelcast.spi.discovery.DiscoveryStrategyFactory;
 import com.hazelcast.spi.discovery.NodeFilter;
 import com.hazelcast.spi.discovery.integration.DiscoveryService;
 import com.hazelcast.spi.discovery.integration.DiscoveryServiceSettings;
-import com.hazelcast.util.ServiceLoader;
+import com.hazelcast.internal.util.ServiceLoader;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,21 +39,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.CollectionUtil.nullToEmpty;
 
 public class DefaultDiscoveryService
         implements DiscoveryService {
 
     private static final String SERVICE_LOADER_TAG = DiscoveryStrategyFactory.class.getCanonicalName();
 
-    private final DiscoveryNode discoveryNode;
     private final ILogger logger;
-    private final Iterable<DiscoveryStrategy> discoveryStrategies;
+    private final DiscoveryNode discoveryNode;
     private final NodeFilter nodeFilter;
+    private final Iterable<DiscoveryStrategy> discoveryStrategies;
 
     public DefaultDiscoveryService(DiscoveryServiceSettings settings) {
-        this.discoveryNode = settings.getDiscoveryNode();
         this.logger = settings.getLogger();
+        this.discoveryNode = settings.getDiscoveryNode();
         this.nodeFilter = getNodeFilter(settings);
         this.discoveryStrategies = loadDiscoveryStrategies(settings);
     }
@@ -87,8 +83,8 @@ public class DefaultDiscoveryService
     }
 
     @Override
-    public Map<String, Object> discoverLocalMetadata() {
-        Map<String, Object> metadata = new HashMap<String, Object>();
+    public Map<String, String> discoverLocalMetadata() {
+        Map<String, String> metadata = new HashMap<>();
         for (DiscoveryStrategy discoveryStrategy : discoveryStrategies) {
             metadata.putAll(discoveryStrategy.discoverLocalMetadata());
         }
@@ -133,19 +129,29 @@ public class DefaultDiscoveryService
     }
 
     private Iterable<DiscoveryStrategy> loadDiscoveryStrategies(DiscoveryServiceSettings settings) {
-        DiscoveryConfig discoveryConfig = settings.getDiscoveryConfig();
         ClassLoader configClassLoader = settings.getConfigClassLoader();
 
         try {
             Collection<DiscoveryStrategyConfig> discoveryStrategyConfigs = new ArrayList<DiscoveryStrategyConfig>(
-                    discoveryConfig.getDiscoveryStrategyConfigs());
-
+                    settings.getAllDiscoveryConfigs());
             List<DiscoveryStrategyFactory> factories = collectFactories(discoveryStrategyConfigs, configClassLoader);
 
             List<DiscoveryStrategy> discoveryStrategies = new ArrayList<DiscoveryStrategy>();
             for (DiscoveryStrategyConfig config : discoveryStrategyConfigs) {
                 DiscoveryStrategy discoveryStrategy = buildDiscoveryStrategy(config, factories);
                 discoveryStrategies.add(discoveryStrategy);
+            }
+
+            if (discoveryStrategies.isEmpty() && settings.isAutoDetectionEnabled()) {
+                logger.fine("Discovery auto-detection enabled, looking for available discovery strategies");
+                DiscoveryStrategyFactory autoDetectedFactory = detectDiscoveryStrategyFactory(factories);
+                if (autoDetectedFactory != null) {
+                    logger.info(String.format("Auto-detection selected discovery strategy: %s", autoDetectedFactory.getClass()));
+                    discoveryStrategies
+                            .add(autoDetectedFactory.newDiscoveryStrategy(discoveryNode, logger, Collections.emptyMap()));
+                } else {
+                    logger.info("No discovery strategy is applicable for auto-detection");
+                }
             }
             return discoveryStrategies;
         } catch (Exception e) {
@@ -158,7 +164,8 @@ public class DefaultDiscoveryService
     }
 
     private List<DiscoveryStrategyFactory> collectFactories(Collection<DiscoveryStrategyConfig> strategyConfigs,
-                                                            ClassLoader classloader) throws Exception {
+                                                            ClassLoader classloader)
+            throws Exception {
         Iterator<DiscoveryStrategyFactory> iterator = ServiceLoader
                 .iterator(DiscoveryStrategyFactory.class, SERVICE_LOADER_TAG, classloader);
 
@@ -183,48 +190,38 @@ public class DefaultDiscoveryService
             String className = discoveryStrategyType.getName();
             String factoryClassName = getFactoryClassName(config);
             if (className.equals(factoryClassName)) {
-                Map<String, Comparable> properties = buildProperties(factory, config, className);
+                Map<String, Comparable> properties = DiscoveryServicePropertiesUtil
+                        .prepareProperties(config.getProperties(), nullToEmpty(factory.getConfigurationProperties()));
                 return factory.newDiscoveryStrategy(discoveryNode, logger, properties);
             }
         }
-        throw new ValidationException("There is no discovery strategy factory to create '"
-                + config + "' Is it a typo in a strategy classname? "
-                + "Perhaps you forgot to include implementation on a classpath?");
+        throw new ValidationException(
+                "There is no discovery strategy factory to create '" + config + "' Is it a typo in a strategy classname? "
+                        + "Perhaps you forgot to include implementation on a classpath?");
     }
 
-    private Map<String, Comparable> buildProperties(DiscoveryStrategyFactory factory, DiscoveryStrategyConfig config,
-                                                    String className) {
-        Collection<PropertyDefinition> propertyDefinitions = factory.getConfigurationProperties();
-        if (propertyDefinitions == null) {
-            return Collections.emptyMap();
-        }
-
-        Map<String, Comparable> properties = config.getProperties();
-        Map<String, Comparable> mappedProperties = createHashMap(propertyDefinitions.size());
-
-        for (PropertyDefinition propertyDefinition : propertyDefinitions) {
-            String propertyKey = propertyDefinition.key();
-            Comparable value = properties.get(propertyKey);
-            if (value == null) {
-                if (!propertyDefinition.optional()) {
-                    throw new HazelcastException(
-                            "Missing property '" + propertyKey + "' on discovery strategy '" + className + "' configuration");
+    private DiscoveryStrategyFactory detectDiscoveryStrategyFactory(List<DiscoveryStrategyFactory> factories) {
+        DiscoveryStrategyFactory highestPriorityFactory = null;
+        for (DiscoveryStrategyFactory factory : factories) {
+            try {
+                if (factory.isAutoDetectionApplicable()) {
+                    logger.fine(
+                            String.format("Discovery strategy factory '%s' is auto-applicable to the current runtime environment",
+                                    factory.getClass()));
+                    if (highestPriorityFactory == null || factory.discoveryStrategyLevel().getPriority()
+                            > highestPriorityFactory.discoveryStrategyLevel().getPriority()) {
+                        highestPriorityFactory = factory;
+                    }
+                } else {
+                    logger.fine(String.format("Discovery Factory '%s' is not auto-applicable to the current runtime environment",
+                            factory.getClass()));
                 }
-                continue;
+            } catch (Exception e) {
+                // exception in auto-detection should not prevent Hazelcast from starting
+                logger.finest(e);
             }
-
-            TypeConverter typeConverter = propertyDefinition.typeConverter();
-            Comparable mappedValue = typeConverter.convert(value);
-
-            ValueValidator validator = propertyDefinition.validator();
-            if (validator != null) {
-                validator.validate(mappedValue);
-            }
-
-            mappedProperties.put(propertyKey, mappedValue);
         }
-
-        return mappedProperties;
+        return highestPriorityFactory;
     }
 
     private String getFactoryClassName(DiscoveryStrategyConfig config) {

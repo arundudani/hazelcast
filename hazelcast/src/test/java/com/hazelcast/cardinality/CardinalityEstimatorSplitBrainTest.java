@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,17 @@
 
 package com.hazelcast.cardinality;
 
-import com.hazelcast.cardinality.impl.CardinalityEstimatorProxy;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.MergePolicyConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.spi.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.DiscardMergePolicy;
 import com.hazelcast.spi.merge.HyperLogLogMergePolicy;
 import com.hazelcast.spi.merge.PassThroughMergePolicy;
 import com.hazelcast.spi.merge.PutIfAbsentMergePolicy;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
 import com.hazelcast.test.SplitBrainTestSupport;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
@@ -45,7 +44,7 @@ import static org.junit.Assert.fail;
 
 @RunWith(Parameterized.class)
 @UseParametersRunnerFactory(HazelcastParallelParametersRunnerFactory.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class CardinalityEstimatorSplitBrainTest extends SplitBrainTestSupport {
 
     private final int INITIAL_COUNT = 100000;
@@ -142,10 +141,8 @@ public class CardinalityEstimatorSplitBrainTest extends SplitBrainTestSupport {
 
         estimatorB1 = instances[0].getCardinalityEstimator(estimatorNameB);
 
-        int partitionId = ((CardinalityEstimatorProxy) estimatorA1).getPartitionId();
-        backupEstimateA = getBackupEstimate(getFirstBackupInstance(instances, partitionId), estimatorNameA);
-        partitionId = ((CardinalityEstimatorProxy) estimatorB1).getPartitionId();
-        backupEstimateB = getBackupEstimate(getFirstBackupInstance(instances, partitionId), estimatorNameB);
+        backupEstimateA = getBackupEstimate(instances, estimatorA1);
+        backupEstimateB = getBackupEstimate(instances, estimatorB1);
 
         if (mergePolicyClass == DiscardMergePolicy.class) {
             onAfterMergeDiscardMergePolicy();

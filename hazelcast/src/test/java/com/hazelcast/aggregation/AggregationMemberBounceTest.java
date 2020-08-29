@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,12 @@ package com.hazelcast.aggregation;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.IMap;
+import com.hazelcast.map.IMap;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.annotation.SlowTest;
 import com.hazelcast.test.bounce.BounceMemberRule;
+import com.hazelcast.test.bounce.BounceTestConfiguration;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -43,7 +44,7 @@ public class AggregationMemberBounceTest extends HazelcastTestSupport {
     @Rule
     public BounceMemberRule bounceMemberRule = BounceMemberRule.with(getConfig())
             .clusterSize(MEMBER_COUNT)
-            .driverCount(DRIVER_COUNT).build();
+            .driverCount(DRIVER_COUNT).driverType(BounceTestConfiguration.DriverType.MEMBER).build();
 
     protected Config getConfig() {
         return new Config();

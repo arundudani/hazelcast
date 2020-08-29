@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,12 @@
 
 package com.hazelcast.cache.impl.operation;
 
-import com.hazelcast.cache.CacheEntryView;
 import com.hazelcast.cache.impl.CacheDataSerializerHook;
-import com.hazelcast.cache.impl.CacheEntryViews;
-import com.hazelcast.cache.impl.ICacheRecordStore;
-import com.hazelcast.cache.impl.ICacheService;
 import com.hazelcast.cache.impl.record.CacheRecord;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.BackupOperation;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupOperation;
 
 import java.io.IOException;
 
@@ -40,8 +35,7 @@ import java.io.IOException;
  * @see CacheGetAndReplaceOperation
  */
 public class CachePutBackupOperation
-        extends AbstractBackupCacheOperation
-        implements BackupOperation {
+        extends KeyBasedCacheOperation implements BackupOperation {
 
     private CacheRecord cacheRecord;
     private boolean wanOriginated;
@@ -50,36 +44,30 @@ public class CachePutBackupOperation
     }
 
     public CachePutBackupOperation(String name, Data key, CacheRecord cacheRecord) {
+        this(name, key, cacheRecord, false);
+    }
+
+    public CachePutBackupOperation(String name, Data key, CacheRecord cacheRecord, boolean wanOriginated) {
         super(name, key);
         if (cacheRecord == null) {
             throw new IllegalArgumentException("Cache record of backup operation cannot be null!");
         }
         this.cacheRecord = cacheRecord;
-    }
-
-    public CachePutBackupOperation(String name, Data key, CacheRecord cacheRecord, boolean wanOriginated) {
-        this(name, key, cacheRecord);
-        if (cacheRecord == null) {
-            throw new IllegalArgumentException("Cache record of backup operation cannot be null!");
-        }
         this.wanOriginated = wanOriginated;
     }
 
     @Override
-    public void runInternal() {
-        ICacheService service = getService();
-        ICacheRecordStore cache = service.getOrCreateRecordStore(name, getPartitionId());
-        cache.putRecord(key, cacheRecord);
-        response = Boolean.TRUE;
+    public void run() {
+        if (recordStore != null) {
+            recordStore.putRecord(key, cacheRecord, true);
+            response = Boolean.TRUE;
+        }
     }
 
     @Override
-    public void afterRunInternal() {
-        if (!wanOriginated && cache.isWanReplicationEnabled()) {
-            SerializationService serializationService = getNodeEngine().getSerializationService();
-            CacheEntryView<Data, Data> entryView = CacheEntryViews.createDefaultEntryView(key,
-                    serializationService.toData(cacheRecord.getValue()), cacheRecord);
-            wanEventPublisher.publishWanReplicationUpdateBackup(name, entryView);
+    public void afterRun() {
+        if (recordStore != null && !wanOriginated) {
+            publishWanUpdate(key, cacheRecord);
         }
     }
 
@@ -98,7 +86,7 @@ public class CachePutBackupOperation
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CacheDataSerializerHook.PUT_BACKUP;
     }
 }

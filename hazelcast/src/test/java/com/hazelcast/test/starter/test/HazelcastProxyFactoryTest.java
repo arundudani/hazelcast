@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,16 +32,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 
-/**
- *
- */
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(SlowTest.class)
 public class HazelcastProxyFactoryTest {
 
     @Test
-    public void testRetunedProxyImplements_sameInterfaceByNameOnTargetClassLoader()
-            throws Exception {
+    public void testReturnedProxyImplements_sameInterfaceByNameOnTargetClassLoader() throws Exception {
         ProxiedInterface delegate = new ProxiedInterface() {
             @Override
             public void get() {
@@ -50,8 +46,8 @@ public class HazelcastProxyFactoryTest {
 
         // HazelcastAPIDelegatingClassloader will reload the bytes of ProxiedInterface as a new class
         // as happens with every com.hazelcast class that contains "test"
-        HazelcastAPIDelegatingClassloader targetClassLoader =
-                new HazelcastAPIDelegatingClassloader(new URL[]{}, HazelcastProxyFactoryTest.class.getClassLoader());
+        HazelcastAPIDelegatingClassloader targetClassLoader
+                = new HazelcastAPIDelegatingClassloader(new URL[]{}, HazelcastProxyFactoryTest.class.getClassLoader());
 
         Object proxy = HazelcastProxyFactory.proxyObjectForStarter(targetClassLoader, delegate);
 
@@ -68,8 +64,8 @@ public class HazelcastProxyFactoryTest {
 
     @Test
     public void testProxyHazelcastInstanceClasses_ofSameVersion_areSame() {
-        HazelcastInstance hz1 = HazelcastStarter.newHazelcastInstance("3.8");
-        HazelcastInstance hz2 = HazelcastStarter.newHazelcastInstance("3.8");
+        HazelcastInstance hz1 = HazelcastStarter.newHazelcastInstance("4.0");
+        HazelcastInstance hz2 = HazelcastStarter.newHazelcastInstance("4.0");
         try {
             assertEquals(hz1.getClass(), hz2.getClass());
         } finally {

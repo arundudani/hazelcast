@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,74 +25,144 @@ import com.hazelcast.map.impl.MapService;
 import com.hazelcast.map.impl.journal.MapEventJournal;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
+import com.hazelcast.ringbuffer.impl.ArrayRingbuffer;
+import com.hazelcast.ringbuffer.impl.Ringbuffer;
 import com.hazelcast.ringbuffer.impl.RingbufferContainer;
 import com.hazelcast.ringbuffer.impl.RingbufferService;
-import com.hazelcast.spi.BackupAwareOperation;
-import com.hazelcast.spi.ObjectNamespace;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.ServiceNamespace;
-import com.hazelcast.spi.ServiceNamespaceAware;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.spi.merge.MergingValueHolder;
+import com.hazelcast.spi.impl.operationservice.BackupAwareOperation;
+import com.hazelcast.internal.services.ObjectNamespace;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.internal.services.ServiceNamespace;
+import com.hazelcast.internal.services.ServiceNamespaceAware;
+import com.hazelcast.spi.merge.RingbufferMergeData;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
+import com.hazelcast.spi.merge.SplitBrainMergeTypes.RingbufferMergeTypes;
+import com.hazelcast.internal.serialization.SerializationService;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
+import static com.hazelcast.internal.nio.IOUtil.readObject;
+import static com.hazelcast.internal.nio.IOUtil.writeObject;
 import static com.hazelcast.ringbuffer.impl.RingbufferDataSerializerHook.F_ID;
 import static com.hazelcast.ringbuffer.impl.RingbufferDataSerializerHook.MERGE_OPERATION;
 import static com.hazelcast.ringbuffer.impl.RingbufferService.SERVICE_NAME;
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingValue;
 
 /**
- * Contains multiple merge entries for split-brain healing with a {@link SplitBrainMergePolicy}.
+ * Contains an entire ringbuffer for split-brain healing with a
+ * {@link SplitBrainMergePolicy}.
  *
  * @since 3.10
  */
-public class MergeOperation extends Operation implements IdentifiedDataSerializable, BackupAwareOperation, ServiceNamespaceAware {
+public class MergeOperation extends Operation
+        implements IdentifiedDataSerializable, BackupAwareOperation, ServiceNamespaceAware {
 
     private ObjectNamespace namespace;
-    private SplitBrainMergePolicy mergePolicy;
-    private List<MergingValueHolder<Object>> mergingValues;
+    private SplitBrainMergePolicy<RingbufferMergeData, RingbufferMergeTypes, RingbufferMergeData> mergePolicy;
+    private Ringbuffer<Object> mergingRingbuffer;
 
+    private transient Ringbuffer<Object> resultRingbuffer;
     private transient RingbufferConfig config;
-    private transient RingbufferContainer<Object, Object> ringbuffer;
-    private transient Map<Long, Data> valueMap;
+    private transient RingbufferService ringbufferService;
+    private transient SerializationService serializationService;
 
     public MergeOperation() {
     }
 
-    public MergeOperation(ObjectNamespace namespace, SplitBrainMergePolicy mergePolicy,
-                          List<MergingValueHolder<Object>> mergingValues) {
+    public MergeOperation(ObjectNamespace namespace,
+                          SplitBrainMergePolicy<RingbufferMergeData, RingbufferMergeTypes, RingbufferMergeData> mergePolicy,
+                          Ringbuffer<Object> mergingRingbuffer) {
         this.namespace = namespace;
         this.mergePolicy = mergePolicy;
-        this.mergingValues = mergingValues;
+        this.mergingRingbuffer = mergingRingbuffer;
     }
 
     @Override
     public void beforeRun() throws Exception {
-        RingbufferService service = getService();
-        config = getRingbufferConfig(service, namespace);
-        ringbuffer = service.getOrCreateContainer(getPartitionId(), namespace, config);
+        this.ringbufferService = getService();
+        this.config = getRingbufferConfig(ringbufferService, namespace);
+        this.serializationService = getNodeEngine().getSerializationService();
     }
 
     @Override
     public void run() throws Exception {
-        valueMap = createHashMap(mergingValues.size());
-        for (MergingValueHolder<Object> mergingValue : mergingValues) {
-            long resultSequence = ringbuffer.merge(mergingValue, mergePolicy);
-            if (resultSequence != -1) {
-                valueMap.put(resultSequence, ringbuffer.readAsData(resultSequence));
+        RingbufferContainer<Object, Object> existingContainer
+                = ringbufferService.getContainerOrNull(getPartitionId(), namespace);
+
+        RingbufferMergeTypes mergingValue =
+                createMergingValue(serializationService, mergingRingbuffer);
+        mergePolicy = (SplitBrainMergePolicy<RingbufferMergeData, RingbufferMergeTypes, RingbufferMergeData>)
+            serializationService.getManagedContext().initialize(mergePolicy);
+
+        resultRingbuffer = merge(existingContainer, mergingValue);
+    }
+
+    /**
+     * Merges the provided {@code mergingValue} into the {@code existingContainer}
+     * and returns the merged ringbuffer.
+     *
+     * @param existingContainer the container into which to merge the data
+     * @param mergingValue      the data to merge
+     * @return the merged ringbuffer
+     */
+    private Ringbuffer<Object> merge(RingbufferContainer<Object, Object> existingContainer, RingbufferMergeTypes mergingValue) {
+        RingbufferMergeTypes existingValue = createMergingValueOrNull(existingContainer);
+
+        RingbufferMergeData resultData = mergePolicy.merge(mergingValue, existingValue);
+
+        if (resultData == null) {
+            ringbufferService.destroyDistributedObject(namespace.getObjectName());
+            return null;
+        } else {
+            if (existingContainer == null) {
+                RingbufferConfig config = getRingbufferConfig(ringbufferService, namespace);
+                existingContainer = ringbufferService.getOrCreateContainer(getPartitionId(), namespace, config);
             }
+            setRingbufferData(resultData, existingContainer);
+            return existingContainer.getRingbuffer();
+        }
+    }
+
+    private RingbufferMergeTypes createMergingValueOrNull(RingbufferContainer<Object, Object> existingContainer) {
+        return existingContainer == null || existingContainer.getRingbuffer().isEmpty()
+                ? null
+                : createMergingValue(serializationService, existingContainer.getRingbuffer());
+    }
+
+    /**
+     * Sets the ringbuffer data given by the {@code fromMergeData} to the
+     * {@code toContainer}.
+     *
+     * @param fromMergeData the data which needs to be set into the containter
+     * @param toContainer   the target ringbuffer container
+     */
+    private void setRingbufferData(
+            RingbufferMergeData fromMergeData,
+            RingbufferContainer<Object, Object> toContainer) {
+        boolean storeEnabled = toContainer.getStore().isEnabled();
+        Data[] storeItems = storeEnabled ? new Data[fromMergeData.size()] : null;
+
+        toContainer.setHeadSequence(fromMergeData.getHeadSequence());
+        toContainer.setTailSequence(fromMergeData.getTailSequence());
+
+        for (long seq = fromMergeData.getHeadSequence(); seq <= fromMergeData.getTailSequence(); seq++) {
+            final Object resultValue = fromMergeData.read(seq);
+            toContainer.set(seq, resultValue);
+            if (storeEnabled) {
+                storeItems[(int) (seq - fromMergeData.getHeadSequence())] = serializationService.toData(resultValue);
+            }
+        }
+        if (storeEnabled) {
+            toContainer.getStore()
+                    .storeAll(fromMergeData.getHeadSequence(), storeItems);
         }
     }
 
     @Override
     public boolean shouldBackup() {
-        return valueMap != null && !valueMap.isEmpty();
+        return true;
     }
 
     @Override
@@ -107,7 +177,7 @@ public class MergeOperation extends Operation implements IdentifiedDataSerializa
 
     @Override
     public Operation getBackupOperation() {
-        return new MergeBackupOperation(namespace.getObjectName(), valueMap);
+        return new MergeBackupOperation(namespace.getObjectName(), resultRingbuffer);
     }
 
     /**
@@ -133,12 +203,12 @@ public class MergeOperation extends Operation implements IdentifiedDataSerializa
             MapService mapService = getNodeEngine().getService(MapService.SERVICE_NAME);
             MapEventJournal journal = mapService.getMapServiceContext().getEventJournal();
             EventJournalConfig journalConfig = journal.getEventJournalConfig(ns);
-            return journal.toRingbufferConfig(journalConfig);
+            return journal.toRingbufferConfig(journalConfig, namespace);
         } else if (CacheService.SERVICE_NAME.equals(serviceName)) {
             CacheService cacheService = getNodeEngine().getService(CacheService.SERVICE_NAME);
             CacheEventJournal journal = cacheService.getEventJournal();
             EventJournalConfig journalConfig = journal.getEventJournalConfig(ns);
-            return journal.toRingbufferConfig(journalConfig);
+            return journal.toRingbufferConfig(journalConfig, namespace);
         } else {
             throw new IllegalArgumentException("Unsupported ringbuffer service name: " + serviceName);
         }
@@ -160,7 +230,7 @@ public class MergeOperation extends Operation implements IdentifiedDataSerializa
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MERGE_OPERATION;
     }
 
@@ -169,9 +239,12 @@ public class MergeOperation extends Operation implements IdentifiedDataSerializa
         super.writeInternal(out);
         out.writeObject(namespace);
         out.writeObject(mergePolicy);
-        out.writeInt(mergingValues.size());
-        for (MergingValueHolder<Object> mergingValue : mergingValues) {
-            out.writeObject(mergingValue);
+
+        out.writeLong(mergingRingbuffer.tailSequence());
+        out.writeLong(mergingRingbuffer.headSequence());
+        out.writeInt((int) mergingRingbuffer.getCapacity());
+        for (Object mergingItem : mergingRingbuffer) {
+            writeObject(out, mergingItem);
         }
     }
 
@@ -180,11 +253,16 @@ public class MergeOperation extends Operation implements IdentifiedDataSerializa
         super.readInternal(in);
         namespace = in.readObject();
         mergePolicy = in.readObject();
-        int size = in.readInt();
-        mergingValues = new ArrayList<MergingValueHolder<Object>>(size);
-        for (int i = 0; i < size; i++) {
-            MergingValueHolder<Object> mergingValue = in.readObject();
-            mergingValues.add(mergingValue);
+
+        final long tailSequence = in.readLong();
+        final long headSequence = in.readLong();
+        final int capacity = in.readInt();
+        mergingRingbuffer = new ArrayRingbuffer<Object>(capacity);
+        mergingRingbuffer.setTailSequence(tailSequence);
+        mergingRingbuffer.setHeadSequence(headSequence);
+
+        for (long seq = headSequence; seq <= tailSequence; seq++) {
+            mergingRingbuffer.set(seq, readObject(in));
         }
     }
 }

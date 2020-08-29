@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,20 @@
 
 package com.hazelcast.map.impl.operation;
 
+import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.PartitionAwareOperation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.PartitionAwareOperation;
 
 import java.io.IOException;
-
-import static com.hazelcast.map.impl.recordstore.RecordStore.DEFAULT_TTL;
 
 public abstract class KeyBasedMapOperation extends MapOperation
         implements PartitionAwareOperation {
 
-    protected Data dataKey;
     protected long threadId;
+    protected Data dataKey;
     protected Data dataValue;
-    protected long ttl = DEFAULT_TTL;
 
     public KeyBasedMapOperation() {
     }
@@ -45,19 +43,6 @@ public abstract class KeyBasedMapOperation extends MapOperation
         super(name);
         this.dataKey = dataKey;
         this.dataValue = dataValue;
-    }
-
-    protected KeyBasedMapOperation(String name, Data dataKey, long ttl) {
-        super(name);
-        this.dataKey = dataKey;
-        this.ttl = ttl;
-    }
-
-    protected KeyBasedMapOperation(String name, Data dataKey, Data dataValue, long ttl) {
-        super(name);
-        this.dataKey = dataKey;
-        this.dataValue = dataValue;
-        this.ttl = ttl;
     }
 
     public final Data getKey() {
@@ -78,25 +63,19 @@ public abstract class KeyBasedMapOperation extends MapOperation
         return dataValue;
     }
 
-    public final long getTtl() {
-        return ttl;
-    }
-
     @Override
     protected void writeInternal(ObjectDataOutput out) throws IOException {
-        out.writeUTF(name);
-        out.writeData(dataKey);
+        super.writeInternal(out);
+        IOUtil.writeData(out, dataKey);
+        IOUtil.writeData(out, dataValue);
         out.writeLong(threadId);
-        out.writeData(dataValue);
-        out.writeLong(ttl);
     }
 
     @Override
     protected void readInternal(ObjectDataInput in) throws IOException {
-        name = in.readUTF();
-        dataKey = in.readData();
+        super.readInternal(in);
+        dataKey = IOUtil.readData(in);
+        dataValue = IOUtil.readData(in);
         threadId = in.readLong();
-        dataValue = in.readData();
-        ttl = in.readLong();
     }
 }

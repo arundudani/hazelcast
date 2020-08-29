@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,28 +16,30 @@
 
 package com.hazelcast.multimap.impl.operations;
 
+import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
 import com.hazelcast.multimap.impl.MultiMapRecord;
 import com.hazelcast.multimap.impl.MultiMapValue;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.BackupOperation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupOperation;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
 
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
 
 /**
- * Contains multiple backup entries for split-brain healing with a {@link com.hazelcast.spi.SplitBrainMergePolicy}.
+ * Creates backups for merged {@link MultiMapRecord} after split-brain healing with a {@link SplitBrainMergePolicy}.
  *
  * @since 3.10
  */
-public class MergeBackupOperation extends MultiMapOperation implements BackupOperation {
+public class MergeBackupOperation extends AbstractMultiMapOperation implements BackupOperation {
 
     private Map<Data, Collection<MultiMapRecord>> backupEntries;
 
@@ -52,15 +54,19 @@ public class MergeBackupOperation extends MultiMapOperation implements BackupOpe
     @Override
     public void run() throws Exception {
         response = true;
-        MultiMapContainer container = getOrCreateContainer();
+        MultiMapContainer container = getOrCreateContainerWithoutAccess();
         for (Map.Entry<Data, Collection<MultiMapRecord>> entry : backupEntries.entrySet()) {
             Data key = entry.getKey();
             Collection<MultiMapRecord> value = entry.getValue();
-            MultiMapValue containerValue = container.getOrCreateMultiMapValue(key);
-            Collection<MultiMapRecord> collection = containerValue.getCollection(false);
-            collection.clear();
-            if (!collection.addAll(value)) {
-                response = false;
+            if (value.isEmpty()) {
+                container.remove(key, false);
+            } else {
+                MultiMapValue containerValue = container.getOrCreateMultiMapValue(key);
+                Collection<MultiMapRecord> collection = containerValue.getCollection(false);
+                collection.clear();
+                if (!collection.addAll(value)) {
+                    response = false;
+                }
             }
         }
     }
@@ -70,7 +76,7 @@ public class MergeBackupOperation extends MultiMapOperation implements BackupOpe
         super.writeInternal(out);
         out.writeInt(backupEntries.size());
         for (Map.Entry<Data, Collection<MultiMapRecord>> entry : backupEntries.entrySet()) {
-            out.writeData(entry.getKey());
+            IOUtil.writeData(out, entry.getKey());
             Collection<MultiMapRecord> collection = entry.getValue();
             out.writeInt(collection.size());
             for (MultiMapRecord record : collection) {
@@ -85,7 +91,7 @@ public class MergeBackupOperation extends MultiMapOperation implements BackupOpe
         int size = in.readInt();
         backupEntries = createHashMap(size);
         for (int i = 0; i < size; i++) {
-            Data key = in.readData();
+            Data key = IOUtil.readData(in);
             int collectionSize = in.readInt();
             Collection<MultiMapRecord> collection = new ArrayList<MultiMapRecord>(collectionSize);
             for (int j = 0; j < collectionSize; j++) {
@@ -97,7 +103,7 @@ public class MergeBackupOperation extends MultiMapOperation implements BackupOpe
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.MERGE_BACKUP_OPERATION;
     }
 }

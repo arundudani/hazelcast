@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,96 +17,76 @@
 package com.hazelcast.scheduledexecutor.impl;
 
 import com.hazelcast.config.ScheduledExecutorConfig;
+import com.hazelcast.internal.util.ConstructorFunction;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.scheduledexecutor.impl.operations.ReplicationOperation;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.spi.merge.DiscardMergePolicy;
-import com.hazelcast.spi.merge.SplitBrainMergePolicyProvider;
-import com.hazelcast.util.ConstructorFunction;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
-import java.util.Collection;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.config.ScheduledExecutorConfig.CapacityPolicy.PER_PARTITION;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
+import static com.hazelcast.scheduledexecutor.impl.DistributedScheduledExecutorService.NOOP_PERMIT;
 
-public class ScheduledExecutorPartition
-        extends AbstractScheduledExecutorContainerHolder {
-
-    private final ILogger logger;
+public class ScheduledExecutorPartition extends AbstractScheduledExecutorContainerHolder {
 
     private final int partitionId;
+    private final ILogger logger;
+    private final ConstructorFunction<String, ScheduledExecutorContainer> containerConstructorFunction;
 
-    private final ConstructorFunction<String, ScheduledExecutorContainer> containerConstructorFunction =
-            new ConstructorFunction<String, ScheduledExecutorContainer>() {
-                @Override
-                public ScheduledExecutorContainer createNew(String name) {
-                    if (logger.isFinestEnabled()) {
-                        logger.finest("[Partition:" + partitionId + "]Create new scheduled executor container with name:" + name);
-                    }
-
-                    ScheduledExecutorConfig config = nodeEngine.getConfig().findScheduledExecutorConfig(name);
-                    return new ScheduledExecutorContainer(name, partitionId, nodeEngine, config.getDurability(),
-                            config.getCapacity());
-                }
-            };
-
-    private final SplitBrainMergePolicyProvider mergePolicyProvider;
-
-    public ScheduledExecutorPartition(NodeEngine nodeEngine, int partitionId, SplitBrainMergePolicyProvider mergePolicyProvider) {
+    ScheduledExecutorPartition(NodeEngine nodeEngine, DistributedScheduledExecutorService service, int partitionId) {
         super(nodeEngine);
         this.logger = nodeEngine.getLogger(getClass());
         this.partitionId = partitionId;
-        this.mergePolicyProvider = mergePolicyProvider;
+        this.containerConstructorFunction = name -> {
+            if (logger.isFinestEnabled()) {
+                logger.finest("[Partition:" + partitionId + "]Create new scheduled executor container with name:" + name);
+            }
+            ScheduledExecutorConfig config = nodeEngine.getConfig().findScheduledExecutorConfig(name);
+            return new ScheduledExecutorContainer(name, partitionId, nodeEngine,
+                    newPermitFor(name, service, config), config.getDurability(), config.isStatisticsEnabled());
+        };
     }
 
-    public Operation prepareReplicationOperation(int replicaIndex, boolean migrationMode) {
+    /**
+     * Collects all tasks for replication for all schedulers on this partition.
+     *
+     * @param replicaIndex the replica index of the member which will receive the returned operation
+     * @return the
+     */
+    public Operation prepareReplicationOperation(int replicaIndex) {
         Map<String, Map<String, ScheduledTaskDescriptor>> map = createHashMap(containers.size());
 
         if (logger.isFinestEnabled()) {
-            logger.finest("[Partition: " + partitionId + "] Prepare replication(migration: " + migrationMode + ") "
-                    + "for index: " + replicaIndex);
+            logger.finest("[Partition: " + partitionId + "] Preparing replication for index: " + replicaIndex);
         }
 
         for (ScheduledExecutorContainer container : containers.values()) {
             if (replicaIndex > container.getDurability()) {
                 continue;
             }
-            map.put(container.getName(), container.prepareForReplication(migrationMode));
+            map.put(container.getName(), container.prepareForReplication());
         }
 
-        return new ReplicationOperation(map);
-    }
-
-    public Map<String, Collection<ScheduledTaskDescriptor>> prepareOwnedSnapshot() {
-        Map<String, Collection<ScheduledTaskDescriptor>> snapshot = new HashMap<String, Collection<ScheduledTaskDescriptor>>();
-        boolean owner = nodeEngine.getPartitionService().isPartitionOwner(partitionId);
-
-        if (logger.isFinestEnabled()) {
-            logger.finest("[Partition: " + partitionId + "] Prepare snapshot of partition owned tasks.");
-        }
-
-        for (ScheduledExecutorContainer container : getContainers()) {
-            try {
-                SplitBrainMergePolicy mergePolicy = getMergePolicy(container.getName());
-                if (owner && !(mergePolicy instanceof DiscardMergePolicy)) {
-                    snapshot.put(container.getName(), container.prepareForReplication(true).values());
-                }
-            } finally {
-                container.destroy();
-            }
-        }
-
-        containers.clear();
-        return snapshot;
+        return map.isEmpty() ? null : new ReplicationOperation(map);
     }
 
     @Override
     public ConstructorFunction<String, ScheduledExecutorContainer> getContainerConstructorFunction() {
         return containerConstructorFunction;
+    }
+
+    CapacityPermit newPermitFor(String name, DistributedScheduledExecutorService service,
+                                ScheduledExecutorConfig config) {
+        if (config.getCapacity() == 0) {
+            return NOOP_PERMIT;
+        }
+
+        return config.getCapacityPolicy() == PER_PARTITION
+                ? new PartitionCapacityPermit(name, config.getCapacity(), partitionId)
+                : service.permitFor(name, config);
     }
 
     void disposeObsoleteReplicas(int thresholdReplicaIndex) {
@@ -133,6 +113,11 @@ public class ScheduledExecutorPartition
         }
     }
 
+    /**
+     * Attempts to promote and schedule all suspended tasks on this partition.
+     * Exceptions throw during rescheduling will be rethrown and will prevent
+     * further suspended tasks from being scheduled.
+     */
     void promoteSuspended() {
         if (logger.isFinestEnabled()) {
             logger.finest("[Partition: " + partitionId + "] " + "Promote suspended");
@@ -143,8 +128,18 @@ public class ScheduledExecutorPartition
         }
     }
 
-    private SplitBrainMergePolicy getMergePolicy(String name) {
-        ScheduledExecutorConfig config = nodeEngine.getConfig().findScheduledExecutorConfig(name);
-        return mergePolicyProvider.getMergePolicy(config.getMergePolicyConfig().getPolicy());
+    /**
+     * Attempts to cancel and interrupt all tasks on all containers. Exceptions
+     * thrown during task cancellation will be rethrown and prevent further
+     * tasks from being cancelled.
+     */
+    void suspendTasks() {
+        if (logger.isFinestEnabled()) {
+            logger.finest("[Partition: " + partitionId + "] Suspending tasks");
+        }
+
+        for (ScheduledExecutorContainer container : containers.values()) {
+            container.suspendTasks();
+        }
     }
 }

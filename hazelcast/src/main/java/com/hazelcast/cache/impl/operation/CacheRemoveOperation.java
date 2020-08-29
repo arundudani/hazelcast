@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@
 package com.hazelcast.cache.impl.operation;
 
 import com.hazelcast.cache.impl.CacheDataSerializerHook;
+import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 import java.io.IOException;
 
@@ -30,8 +31,7 @@ import java.io.IOException;
  * @see com.hazelcast.cache.impl.ICacheRecordStore#remove(Data, String, String, int)
  * @see com.hazelcast.cache.impl.ICacheRecordStore#remove(Data, Object, String, String, int)
  */
-public class CacheRemoveOperation
-        extends AbstractMutatingCacheOperation {
+public class CacheRemoveOperation extends MutatingCacheOperation {
 
     // if same
     private Data oldValue;
@@ -48,18 +48,16 @@ public class CacheRemoveOperation
     public void run()
             throws Exception {
         if (oldValue == null) {
-            response = cache.remove(key, getCallerUuid(), null, completionId);
+            response = recordStore.remove(key, getCallerUuid(), null, completionId);
         } else {
-            response = cache.remove(key, oldValue, getCallerUuid(), null, completionId);
+            response = recordStore.remove(key, oldValue, getCallerUuid(), null, completionId);
         }
     }
 
     @Override
     public void afterRun() throws Exception {
         if (Boolean.TRUE.equals(response)) {
-            if (cache.isWanReplicationEnabled()) {
-                wanEventPublisher.publishWanReplicationRemove(name, key);
-            }
+            publishWanRemove(key);
         }
         super.afterRun();
     }
@@ -75,7 +73,7 @@ public class CacheRemoveOperation
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CacheDataSerializerHook.REMOVE;
     }
 
@@ -83,13 +81,13 @@ public class CacheRemoveOperation
     protected void writeInternal(ObjectDataOutput out)
             throws IOException {
         super.writeInternal(out);
-        out.writeData(oldValue);
+        IOUtil.writeData(out, oldValue);
     }
 
     @Override
     protected void readInternal(ObjectDataInput in)
             throws IOException {
         super.readInternal(in);
-        oldValue = in.readData();
+        oldValue = IOUtil.readData(in);
     }
 }

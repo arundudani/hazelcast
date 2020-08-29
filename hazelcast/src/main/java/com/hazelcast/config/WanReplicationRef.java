@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,126 +16,174 @@
 
 package com.hazelcast.config;
 
+import com.hazelcast.internal.config.ConfigDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.DataSerializable;
-import com.hazelcast.nio.serialization.BinaryInterface;
+import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
+import com.hazelcast.spi.merge.PassThroughMergePolicy;
 
+import javax.annotation.Nonnull;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
+
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
- * Configuration for Wan target replication reference
+ * Configuration for a WAN target replication reference. This configuration
+ * is used on IMap and ICache configurations to refer to an actual WAN
+ * replication configuration. This way, several maps and cache configurations
+ * may share a single WAN replication configuration.
+ *
+ * @see WanReplicationConfig
  */
-@BinaryInterface
-public class WanReplicationRef implements DataSerializable, Serializable {
+public class WanReplicationRef implements IdentifiedDataSerializable, Serializable {
 
-    private String name;
-    private String mergePolicy;
-    private List<String> filters = new LinkedList<String>();
+    private static final String DEFAULT_MERGE_POLICY_CLASS_NAME = PassThroughMergePolicy.class.getName();
+
     private boolean republishingEnabled = true;
-
-    private WanReplicationRefReadOnly readOnly;
+    private String name;
+    private String mergePolicyClassName = DEFAULT_MERGE_POLICY_CLASS_NAME;
+    private List<String> filters = new LinkedList<>();
 
     public WanReplicationRef() {
     }
 
-    public WanReplicationRef(String name, String mergePolicy, List<String> filters, boolean republishingEnabled) {
+    public WanReplicationRef(WanReplicationRef ref) {
+        this(ref.name, ref.mergePolicyClassName, ref.filters, ref.republishingEnabled);
+    }
+
+    public WanReplicationRef(String name,
+                             String mergePolicyClassName,
+                             List<String> filters,
+                             boolean republishingEnabled) {
         this.name = name;
-        this.mergePolicy = mergePolicy;
+        this.mergePolicyClassName = mergePolicyClassName;
         this.filters = filters;
         this.republishingEnabled = republishingEnabled;
     }
 
-    public WanReplicationRef(WanReplicationRef ref) {
-        name = ref.name;
-        mergePolicy = ref.mergePolicy;
-        filters = ref.filters;
-        republishingEnabled = ref.republishingEnabled;
-    }
-
     /**
-     * Gets immutable version of this configuration.
-     *
-     * @return immutable version of this configuration
-     * @deprecated this method will be removed in 4.0; it is meant for internal usage only
+     * Returns the WAN replication reference name.
      */
-    public WanReplicationRefReadOnly getAsReadOnly() {
-        if (readOnly == null) {
-            readOnly = new WanReplicationRefReadOnly(this);
-        }
-        return readOnly;
-    }
-
     public String getName() {
         return name;
     }
 
-    public WanReplicationRef setName(String name) {
+    /**
+     * Sets the WAN replication reference name.
+     *
+     * @param name the reference name
+     * @return this config
+     */
+    public WanReplicationRef setName(@Nonnull String name) {
+        checkNotNull(name, "Name must not be null");
         this.name = name;
         return this;
     }
 
-    public String getMergePolicy() {
-        return mergePolicy;
+    /**
+     * Returns the merge policy sent to the WAN replication target to merge
+     * replicated entries with existing target entries.
+     * The default merge policy is {@link #DEFAULT_MERGE_POLICY_CLASS_NAME}
+     */
+    public @Nonnull String getMergePolicyClassName() {
+        return mergePolicyClassName;
     }
 
-    public WanReplicationRef setMergePolicy(String mergePolicy) {
-        this.mergePolicy = mergePolicy;
+    /**
+     * Sets the merge policy sent to the WAN replication target to merge
+     * replicated entries with existing target entries.
+     * The default merge policy is {@link #DEFAULT_MERGE_POLICY_CLASS_NAME}
+     *
+     * @param mergePolicyClassName the merge policy
+     * @return this config
+     */
+    public WanReplicationRef setMergePolicyClassName(@Nonnull String mergePolicyClassName) {
+        checkNotNull(mergePolicyClassName, "Merge policy class name must not be null");
+        this.mergePolicyClassName = mergePolicyClassName;
         return this;
     }
 
     /**
-     * Add class name implementing the CacheWanEventFilter or MapWanEventFilter for filtering WAN replication events.
+     * Adds the class name implementing the CacheWanEventFilter or
+     * MapWanEventFilter for filtering outbound WAN replication events.
+     * <p>
      * NOTE: EE only
      *
-     * @param filter the class name
-     * @return this configuration
+     * @param filterClassName the class name
+     * @return this config
      */
-    public WanReplicationRef addFilter(String filter) {
-        filters.add(filter);
+    public WanReplicationRef addFilter(@Nonnull String filterClassName) {
+        checkNotNull(filterClassName, "Filter class name must not be null");
+        filters.add(filterClassName);
         return this;
     }
 
     /**
-     * Return the list of class names implementing the CacheWanEventFilter or MapWanEventFilter for filtering WAN replication
-     * events.
+     * Returns the list of class names implementing the CacheWanEventFilter or
+     * MapWanEventFilter for filtering outbound WAN replication events.
+     * <p>
      * NOTE: EE only
      *
      * @return list of class names implementing the CacheWanEventFilter or MapWanEventFilter
      */
-    public List<String> getFilters() {
+    public @Nonnull
+    List<String> getFilters() {
         return filters;
     }
 
     /**
-     * Set the list of class names implementing the CacheWanEventFilter or MapWanEventFilter for filtering WAN replication
-     * events.
+     * Sets the list of class names implementing the CacheWanEventFilter or
+     * MapWanEventFilter for filtering outbound WAN replication events.
+     * <p>
      * NOTE: EE only
      *
      * @param filters the list of class names implementing CacheWanEventFilter or MapWanEventFilter
-     * @return this configuration
+     * @return this config
      */
-    public WanReplicationRef setFilters(List<String> filters) {
+    public WanReplicationRef setFilters(@Nonnull List<String> filters) {
+        checkNotNull(filters, "Filters must not be null");
         this.filters = filters;
         return this;
     }
 
+    /**
+     * Returns {@code true} if incoming WAN events to this member should be
+     * republished (forwarded) to this WAN replication reference.
+     */
     public boolean isRepublishingEnabled() {
         return republishingEnabled;
     }
 
+    /**
+     * Sets if incoming WAN events to this member should be republished
+     * (forwarded) to this WAN replication reference.
+     *
+     * @param republishEnabled whether WAN event republishing is enabled
+     * @return this config
+     */
     public WanReplicationRef setRepublishingEnabled(boolean republishEnabled) {
         this.republishingEnabled = republishEnabled;
         return this;
     }
 
     @Override
+    public int getFactoryId() {
+        return ConfigDataSerializerHook.F_ID;
+    }
+
+    @Override
+    public int getClassId() {
+        return ConfigDataSerializerHook.WAN_REPLICATION_REF;
+    }
+
+    @Override
     public void writeData(ObjectDataOutput out) throws IOException {
         out.writeUTF(name);
-        out.writeUTF(mergePolicy);
+        out.writeUTF(mergePolicyClassName);
         out.writeInt(filters.size());
         for (String filter : filters) {
             out.writeUTF(filter);
@@ -146,7 +194,7 @@ public class WanReplicationRef implements DataSerializable, Serializable {
     @Override
     public void readData(ObjectDataInput in) throws IOException {
         name = in.readUTF();
-        mergePolicy = in.readUTF();
+        mergePolicyClassName = in.readUTF();
         int size = in.readInt();
         for (int i = 0; i < size; i++) {
             filters.add(in.readUTF());
@@ -158,7 +206,7 @@ public class WanReplicationRef implements DataSerializable, Serializable {
     public String toString() {
         return "WanReplicationRef{"
                 + "name='" + name + '\''
-                + ", mergePolicy='" + mergePolicy + '\''
+                + ", mergePolicy='" + mergePolicyClassName + '\''
                 + ", filters='" + filters + '\''
                 + ", republishingEnabled='" + republishingEnabled
                 + '\''
@@ -166,7 +214,6 @@ public class WanReplicationRef implements DataSerializable, Serializable {
     }
 
     @Override
-    @SuppressWarnings("checkstyle:npathcomplexity")
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -174,26 +221,15 @@ public class WanReplicationRef implements DataSerializable, Serializable {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-
         WanReplicationRef that = (WanReplicationRef) o;
-        if (republishingEnabled != that.republishingEnabled) {
-            return false;
-        }
-        if (name != null ? !name.equals(that.name) : that.name != null) {
-            return false;
-        }
-        if (mergePolicy != null ? !mergePolicy.equals(that.mergePolicy) : that.mergePolicy != null) {
-            return false;
-        }
-        return filters != null ? filters.equals(that.filters) : that.filters == null;
+        return republishingEnabled == that.republishingEnabled
+                && Objects.equals(name, that.name)
+                && Objects.equals(mergePolicyClassName, that.mergePolicyClassName)
+                && Objects.equals(filters, that.filters);
     }
 
     @Override
     public int hashCode() {
-        int result = name != null ? name.hashCode() : 0;
-        result = 31 * result + (mergePolicy != null ? mergePolicy.hashCode() : 0);
-        result = 31 * result + (filters != null ? filters.hashCode() : 0);
-        result = 31 * result + (republishingEnabled ? 1 : 0);
-        return result;
+        return Objects.hash(republishingEnabled, name, mergePolicyClassName, filters);
     }
 }

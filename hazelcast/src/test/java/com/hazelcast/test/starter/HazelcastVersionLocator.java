@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,22 +18,28 @@ package com.hazelcast.test.starter;
 
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
-import org.apache.http.HttpEntity;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
 
+import static com.hazelcast.internal.nio.IOUtil.closeResource;
+import static com.hazelcast.internal.nio.IOUtil.drainTo;
 import static com.hazelcast.test.JenkinsDetector.isOnJenkins;
+import static com.hazelcast.test.starter.HazelcastStarterUtils.rethrowGuardianException;
 import static java.io.File.separator;
 import static java.lang.String.format;
-import static org.apache.http.HttpStatus.SC_OK;
 
 public class HazelcastVersionLocator {
+
+    // artifact indexes
+    public static final int HAZELCAST_JAR_INDEX = 0;
+    public static final int HAZELCAST_TESTS_JAR_INDEX = 1;
+    public static final int HAZELCAST_EE_JAR_INDEX = 2;
+    public static final int HAZELCAST_EE_TESTS_JAR_INDEX = 3;
 
     private static final ILogger LOGGER = Logger.getLogger(HazelcastVersionLocator.class);
 
@@ -41,61 +47,57 @@ public class HazelcastVersionLocator {
     private static final String MAVEN_CENTRAL_PREFIX;
     private static final String HAZELCAST_REPOSITORY_PREFIX;
 
-    private static final String MEMBER_PATH = "/com/hazelcast/hazelcast/%1$s/hazelcast-%1$s.jar";
-    private static final String EE_MEMBER_PATH = "/com/hazelcast/hazelcast-enterprise/%1$s/hazelcast-enterprise-%1$s.jar";
-    private static final String CLIENT_PATH = "/com/hazelcast/hazelcast-client/%1$s/hazelcast-client-%1$s.jar";
-    private static final String EE_CLIENT_PATH
-            = "/com/hazelcast/hazelcast-enterprise-client/%1$s/hazelcast-enterprise-client-%1$s.jar";
+    private static final String OS_PATH = "/com/hazelcast/hazelcast/%1$s/hazelcast-%1$s.jar";
+    private static final String OS_TESTS_PATH = "/com/hazelcast/hazelcast/%1$s/hazelcast-%1$s-tests.jar";
+    private static final String EE_PATH = "/com/hazelcast/hazelcast-enterprise/%1$s/hazelcast-enterprise-%1$s.jar";
+    private static final String EE_TESTS_PATH = "/com/hazelcast/hazelcast-enterprise/%1$s/hazelcast-enterprise-%1$s-tests.jar";
 
     static {
         LOCAL_M2_REPOSITORY_PREFIX = System.getProperty("user.home") + separator + ".m2" + separator + "repository";
         MAVEN_CENTRAL_PREFIX = "https://repo1.maven.org/maven2";
-        HAZELCAST_REPOSITORY_PREFIX = "https://repository-hazelcast-l337.forge.cloudbees.com/release";
+        HAZELCAST_REPOSITORY_PREFIX = "https://repository.hazelcast.com/release";
     }
 
     public static File[] locateVersion(String version, File target, boolean enterprise) {
-        File[] files;
+        File[] files = new File[enterprise ? 4 : 2];
+        files[HAZELCAST_JAR_INDEX] = locateMainArtifact(version, target, false);
+        files[HAZELCAST_TESTS_JAR_INDEX] = locateTestsArtifact(version, target, false);
         if (enterprise) {
-            files = new File[4];
-            files[2] = locateMember(version, target, true);
-            files[3] = locateClient(version, target, true);
-        } else {
-            files = new File[2];
+            files[HAZELCAST_EE_JAR_INDEX] = locateMainArtifact(version, target, true);
+            files[HAZELCAST_EE_TESTS_JAR_INDEX] = locateTestsArtifact(version, target, true);
         }
-        files[0] = locateMember(version, target, false);
-        files[1] = locateClient(version, target, false);
         return files;
     }
 
-    // attempts to locate member artifact in local maven repository, then downloads
-    private static File locateMember(String version, File target, boolean enterprise) {
-        File artifact = new File(LOCAL_M2_REPOSITORY_PREFIX + constructPathForMember(version, enterprise));
+    // attempts to locate hazelcast artifact in local maven repository, then downloads
+    private static File locateMainArtifact(String version, File target, boolean enterprise) {
+        File artifact = new File(LOCAL_M2_REPOSITORY_PREFIX + constructPath(version, enterprise));
         if (artifact.exists()) {
             return artifact;
         } else {
-            return downloadMember(version, target, enterprise);
+            return downloadMainArtifact(version, target, enterprise);
         }
     }
 
-    // first attempt to locate artifact in local maven repository, then download
-    private static File locateClient(String version, File target, boolean enterprise) {
-        File artifact = new File(LOCAL_M2_REPOSITORY_PREFIX + constructPathForClient(version, enterprise));
+    // attempts to locate tests artifact in local maven repository, then downloads
+    private static File locateTestsArtifact(String version, File target, boolean enterprise) {
+        File artifact = new File(LOCAL_M2_REPOSITORY_PREFIX + constructPathForTests(version, enterprise));
         if (artifact.exists()) {
             return artifact;
         } else {
-            return downloadClient(version, target, enterprise);
+            return downloadTestsArtifact(version, target, enterprise);
         }
     }
 
-    private static File downloadClient(String version, File target, boolean enterprise) {
-        String url = constructUrlForClient(version, enterprise);
+    private static File downloadMainArtifact(String version, File target, boolean enterprise) {
+        String url = constructUrl(version, enterprise);
         String filename = extractFilenameFromUrl(url);
         logWarningForArtifactDownload(version, false, enterprise);
         return downloadFile(url, target, filename);
     }
 
-    private static File downloadMember(String version, File target, boolean enterprise) {
-        String url = constructUrlForMember(version, enterprise);
+    private static File downloadTestsArtifact(String version, File target, boolean enterprise) {
+        String url = constructUrlForTests(version, enterprise);
         String filename = extractFilenameFromUrl(url);
         logWarningForArtifactDownload(version, true, enterprise);
         return downloadFile(url, target, filename);
@@ -107,54 +109,45 @@ public class HazelcastVersionLocator {
     }
 
     private static File downloadFile(String url, File targetDirectory, String filename) {
-        CloseableHttpClient client = HttpClients.createDefault();
         File targetFile = new File(targetDirectory, filename);
         if (targetFile.isFile() && targetFile.exists()) {
             return targetFile;
         }
-        HttpGet request = new HttpGet(url);
+        FileOutputStream fos = null;
+        InputStream is = null;
         try {
-            CloseableHttpResponse response = client.execute(request);
-            if (response.getStatusLine().getStatusCode() != SC_OK) {
-                throw new GuardianException("Cannot download file from " + url + ", http response code: "
-                        + response.getStatusLine().getStatusCode());
-            }
-            HttpEntity entity = response.getEntity();
-            FileOutputStream fos = new FileOutputStream(targetFile);
-            entity.writeTo(fos);
-            fos.close();
+            is = new BufferedInputStream(new URL(url).openStream());
+            fos = new FileOutputStream(targetFile);
+            drainTo(is, fos);
             targetFile.deleteOnExit();
             return targetFile;
         } catch (IOException e) {
-            throw Utils.rethrow(e);
+            throw rethrowGuardianException(e);
         } finally {
-            try {
-                client.close();
-            } catch (IOException e) {
-                // ignore
-            }
+            closeResource(fos);
+            closeResource(is);
         }
     }
 
-    private static String constructUrlForClient(String version, boolean enterprise) {
+    private static String constructUrl(String version, boolean enterprise) {
         return (enterprise ? HAZELCAST_REPOSITORY_PREFIX : MAVEN_CENTRAL_PREFIX)
-                + constructPathForClient(version, enterprise);
+                + constructPath(version, enterprise);
     }
 
-    private static String constructUrlForMember(String version, boolean enterprise) {
+    private static String constructUrlForTests(String version, boolean enterprise) {
         return (enterprise ? HAZELCAST_REPOSITORY_PREFIX : MAVEN_CENTRAL_PREFIX)
-                + constructPathForMember(version, enterprise);
+                + constructPathForTests(version, enterprise);
     }
 
-    private static String constructPathForClient(String version, boolean enterprise) {
-        return format(enterprise ? EE_CLIENT_PATH : CLIENT_PATH, version);
+    private static String constructPath(String version, boolean enterprise) {
+        return format(enterprise ? EE_PATH : OS_PATH, version);
     }
 
-    private static String constructPathForMember(String version, boolean enterprise) {
-        return format(enterprise ? EE_MEMBER_PATH : MEMBER_PATH, version);
+    private static String constructPathForTests(String version, boolean enterprise) {
+        return format(enterprise ? EE_TESTS_PATH : OS_TESTS_PATH, version);
     }
 
-    private static void logWarningForArtifactDownload(String version, boolean member, boolean enterprise) {
+    private static void logWarningForArtifactDownload(String version, boolean tests, boolean enterprise) {
         if (isOnJenkins()) {
             return;
         }
@@ -164,13 +157,10 @@ public class HazelcastVersionLocator {
                 .append("will be downloaded from a remote repository. You can speed up the compatibility tests by "
                         + "installing the missing artifacts in your local maven repository so they don't have to be "
                         + "downloaded each time:\n $ mvn dependency:get -Dartifact=com.hazelcast:");
-        if (enterprise) {
-            sb.append(member ? "hazelcast-enterprise:" : "hazelcast-enterprise-client:");
-        } else {
-            sb.append(member ? "hazelcast:" : "hazelcast-client:");
-        }
-        sb.append(version)
-                .append(enterprise ? " -DremoteRepositories=https://repository-hazelcast-l337.forge.cloudbees.com/release" : "");
+        sb.append(enterprise ? "hazelcast-enterprise:" : "hazelcast:")
+          .append(version)
+          .append(tests ? ":jar:tests" : "")
+          .append(enterprise ? " -DremoteRepositories=https://repository.hazelcast.com/release" : "");
         LOGGER.warning(sb.toString());
     }
 }

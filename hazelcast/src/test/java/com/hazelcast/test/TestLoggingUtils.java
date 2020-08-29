@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import static com.hazelcast.test.JenkinsDetector.isOnJenkins;
 
 public final class TestLoggingUtils {
 
-    private static String LOGGING_TYPE_PROP_NAME = "hazelcast.logging.type";
-    private static String LOGGING_CLASS_PROP_NAME = "hazelcast.logging.class";
+    private static final String LOGGING_TYPE_PROP_NAME = "hazelcast.logging.type";
+    private static final String LOGGING_CLASS_PROP_NAME = "hazelcast.logging.class";
 
     private static final boolean IS_LOG4J2_AVAILABLE = isClassAvailable("org.apache.logging.log4j.Logger");
 

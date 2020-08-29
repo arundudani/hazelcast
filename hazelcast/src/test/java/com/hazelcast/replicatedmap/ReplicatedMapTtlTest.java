@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,11 @@
 package com.hazelcast.replicatedmap;
 
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.ReplicatedMap;
+import com.hazelcast.internal.util.scheduler.SecondsBasedEntryTaskScheduler;
+import com.hazelcast.replicatedmap.impl.ReplicatedMapProxy;
+import com.hazelcast.replicatedmap.impl.ReplicatedMapService;
+import com.hazelcast.replicatedmap.impl.record.AbstractBaseReplicatedRecordStore;
+import com.hazelcast.replicatedmap.impl.record.ReplicatedRecordStore;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
 import com.hazelcast.test.annotation.SlowTest;
@@ -26,9 +30,13 @@ import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
+
+import static com.hazelcast.test.Accessors.getNodeEngineImpl;
+import static junit.framework.TestCase.assertTrue;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(SlowTest.class)
@@ -104,5 +112,65 @@ public class ReplicatedMapTtlTest extends ReplicatedMapAbstractTest {
                 }
             }
         });
+    }
+
+    @Test
+    public void clear_empties_internal_ttl_schedulers() {
+        HazelcastInstance node = createHazelcastInstance();
+        String mapName = "test";
+        ReplicatedMap map = node.getReplicatedMap(mapName);
+
+        for (int i = 0; i < 1000; i++) {
+            map.put(i, i, 100, TimeUnit.DAYS);
+        }
+
+        map.clear();
+
+        assertAllTtlSchedulersEmpty(map);
+    }
+
+    @Test
+    public void remove_empties_internal_ttl_schedulers() {
+        HazelcastInstance node = createHazelcastInstance();
+        String mapName = "test";
+        ReplicatedMap map = node.getReplicatedMap(mapName);
+
+        for (int i = 0; i < 1000; i++) {
+            map.put(i, i, 100, TimeUnit.DAYS);
+        }
+
+        for (int i = 0; i < 1000; i++) {
+            map.remove(i);
+        }
+
+        assertAllTtlSchedulersEmpty(map);
+    }
+
+    @Test
+    public void service_reset_empties_internal_ttl_schedulers() {
+        HazelcastInstance node = createHazelcastInstance();
+        String mapName = "test";
+        ReplicatedMap map = node.getReplicatedMap(mapName);
+
+        for (int i = 0; i < 1000; i++) {
+            map.put(i, i, 100, TimeUnit.DAYS);
+        }
+
+        ReplicatedMapService service = getNodeEngineImpl(node).getService(ReplicatedMapService.SERVICE_NAME);
+        service.reset();
+
+        assertAllTtlSchedulersEmpty(map);
+    }
+
+    private static void assertAllTtlSchedulersEmpty(ReplicatedMap map) {
+        String mapName = map.getName();
+        ReplicatedMapProxy replicatedMapProxy = (ReplicatedMapProxy) map;
+        ReplicatedMapService service = (ReplicatedMapService) replicatedMapProxy.getService();
+        Collection<ReplicatedRecordStore> stores = service.getAllReplicatedRecordStores(mapName);
+        for (ReplicatedRecordStore store : stores) {
+            assertTrue(
+                    ((SecondsBasedEntryTaskScheduler) ((AbstractBaseReplicatedRecordStore) store)
+                            .getTtlEvictionScheduler()).isEmpty());
+        }
     }
 }

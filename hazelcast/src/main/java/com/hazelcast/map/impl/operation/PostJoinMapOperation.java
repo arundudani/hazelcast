@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package com.hazelcast.map.impl.operation;
 
-import com.hazelcast.core.IMapEvent;
+import com.hazelcast.map.IMapEvent;
 import com.hazelcast.map.MapInterceptor;
 import com.hazelcast.map.impl.InterceptorRegistry;
 import com.hazelcast.map.impl.ListenerAdapter;
@@ -30,13 +30,12 @@ import com.hazelcast.map.impl.querycache.accumulator.AccumulatorInfoSupplier;
 import com.hazelcast.map.impl.querycache.publisher.MapPublisherRegistry;
 import com.hazelcast.map.impl.querycache.publisher.PublisherContext;
 import com.hazelcast.map.impl.querycache.publisher.PublisherRegistry;
+import com.hazelcast.cluster.Address;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.impl.Versioned;
-import com.hazelcast.query.impl.MapIndexInfo;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.version.Version;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.TargetAware;
 
 import java.io.IOException;
 import java.util.AbstractMap;
@@ -46,12 +45,11 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-import static com.hazelcast.internal.cluster.Versions.V3_9;
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
 
-public class PostJoinMapOperation extends Operation implements IdentifiedDataSerializable, Versioned {
+public class PostJoinMapOperation extends Operation implements IdentifiedDataSerializable, TargetAware {
 
-    private List<InterceptorInfo> interceptorInfoList = new LinkedList<InterceptorInfo>();
+    private List<InterceptorInfo> interceptorInfoList = new LinkedList<>();
     private List<AccumulatorInfo> infoList;
 
     @Override
@@ -77,7 +75,7 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
     public static class InterceptorInfo implements IdentifiedDataSerializable {
 
         private String mapName;
-        private final List<Map.Entry<String, MapInterceptor>> interceptors = new LinkedList<Map.Entry<String, MapInterceptor>>();
+        private final List<Map.Entry<String, MapInterceptor>> interceptors = new LinkedList<>();
 
         InterceptorInfo(String mapName) {
             this.mapName = mapName;
@@ -87,7 +85,7 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
         }
 
         void addInterceptor(String id, MapInterceptor interceptor) {
-            interceptors.add(new AbstractMap.SimpleImmutableEntry<String, MapInterceptor>(id, interceptor));
+            interceptors.add(new AbstractMap.SimpleImmutableEntry<>(id, interceptor));
         }
 
         @Override
@@ -107,7 +105,7 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
             for (int i = 0; i < size; i++) {
                 String id = in.readUTF();
                 MapInterceptor interceptor = in.readObject();
-                interceptors.add(new AbstractMap.SimpleImmutableEntry<String, MapInterceptor>(id, interceptor));
+                interceptors.add(new AbstractMap.SimpleImmutableEntry<>(id, interceptor));
             }
         }
 
@@ -117,7 +115,7 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
         }
 
         @Override
-        public int getId() {
+        public int getClassId() {
             return MapDataSerializerHook.INTERCEPTOR_INFO;
         }
     }
@@ -126,6 +124,7 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
     public void run() throws Exception {
         MapService mapService = getService();
         MapServiceContext mapServiceContext = mapService.getMapServiceContext();
+
         for (InterceptorInfo interceptorInfo : interceptorInfoList) {
             final MapContainer mapContainer = mapServiceContext.getMapContainer(interceptorInfo.mapName);
             InterceptorRegistry interceptorRegistry = mapContainer.getInterceptorRegistry();
@@ -153,11 +152,8 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
             PublisherRegistry publisherRegistry = mapPublisherRegistry.getOrCreate(info.getMapName());
             publisherRegistry.getOrCreate(info.getCacheId());
             // marker listener.
-            mapServiceContext.addLocalListenerAdapter(new ListenerAdapter<IMapEvent>() {
-                @Override
-                public void onEvent(IMapEvent event) {
+            mapServiceContext.addLocalListenerAdapter((ListenerAdapter<IMapEvent>) event -> {
 
-                }
             }, info.getMapName());
         }
     }
@@ -175,15 +171,10 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
     @Override
     protected void writeInternal(ObjectDataOutput out) throws IOException {
         super.writeInternal(out);
-        // RU_COMPAT_3_9
-        // fix for PostJoinMapOperation not being Versioned in 3.9.x: write 0 index info count
-        Version outputVersion = out.getVersion();
-        if (outputVersion.isUnknown() || outputVersion.isEqualTo(V3_9)) {
-            out.writeInt(0);
-        }
+
         out.writeInt(interceptorInfoList.size());
         for (InterceptorInfo interceptorInfo : interceptorInfoList) {
-            interceptorInfo.writeData(out);
+            out.writeObject(interceptorInfo);
         }
         int size = infoList.size();
         out.writeInt(size);
@@ -195,30 +186,17 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
     @Override
     protected void readInternal(ObjectDataInput in) throws IOException {
         super.readInternal(in);
-        // RU_COMPAT_39
-        // Version 3.9.x still sends index info's because PostJoinMapOperation was not marked Versioned
-        Version inputversion = in.getVersion();
-        if (inputversion.isUnknown() || inputversion.isEqualTo(V3_9)) {
-            // just consume the bytes
-            int indexesCount = in.readInt();
-            for (int i = 0; i < indexesCount; i++) {
-                MapIndexInfo mapIndexInfo = new MapIndexInfo();
-                mapIndexInfo.readData(in);
-            }
-        }
 
         int interceptorsCount = in.readInt();
         for (int i = 0; i < interceptorsCount; i++) {
-            InterceptorInfo info = new InterceptorInfo();
-            info.readData(in);
-            interceptorInfoList.add(info);
+            interceptorInfoList.add(in.readObject());
         }
         int accumulatorsCount = in.readInt();
         if (accumulatorsCount < 1) {
             infoList = Collections.emptyList();
             return;
         }
-        infoList = new ArrayList<AccumulatorInfo>(accumulatorsCount);
+        infoList = new ArrayList<>(accumulatorsCount);
         for (int i = 0; i < accumulatorsCount; i++) {
             AccumulatorInfo info = in.readObject();
             infoList.add(info);
@@ -232,7 +210,11 @@ public class PostJoinMapOperation extends Operation implements IdentifiedDataSer
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MapDataSerializerHook.POST_JOIN_MAP_OPERATION;
+    }
+
+    @Override
+    public void setTarget(Address address) {
     }
 }

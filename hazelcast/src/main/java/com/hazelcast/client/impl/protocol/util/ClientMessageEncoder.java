@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,54 @@
 package com.hazelcast.client.impl.protocol.util;
 
 import com.hazelcast.client.impl.protocol.ClientMessage;
-import com.hazelcast.internal.networking.ChannelOutboundHandler;
+import com.hazelcast.client.impl.protocol.ClientMessageWriter;
+import com.hazelcast.internal.networking.HandlerStatus;
+import com.hazelcast.internal.networking.OutboundHandler;
 
 import java.nio.ByteBuffer;
+import java.util.function.Supplier;
+
+import static com.hazelcast.internal.networking.HandlerStatus.CLEAN;
+import static com.hazelcast.internal.networking.HandlerStatus.DIRTY;
+import static com.hazelcast.internal.nio.IOUtil.compactOrClear;
 
 /**
- * A {@link ChannelOutboundHandler} for the new-client. It writes ClientMessages to the ByteBuffer.
+ * A {@link OutboundHandler} for the new-client. It writes ClientMessages to the ByteBuffer.
  */
-public class ClientMessageEncoder implements ChannelOutboundHandler<ClientMessage> {
+public class ClientMessageEncoder extends OutboundHandler<Supplier<ClientMessage>, ByteBuffer> {
+
+    private ClientMessage message;
+    private final ClientMessageWriter clientMessageWriter = new ClientMessageWriter();
 
     @Override
-    public boolean onWrite(ClientMessage message, ByteBuffer dst) {
-        return message.writeTo(dst);
+    public void handlerAdded() {
+        initDstBuffer();
+    }
+
+    @Override
+    public HandlerStatus onWrite() {
+        compactOrClear(dst);
+        try {
+            for (; ; ) {
+                if (message == null) {
+                    message = src.get();
+
+                    if (message == null) {
+                        // everything is processed, so we are done
+                        return CLEAN;
+                    }
+                }
+
+                if (clientMessageWriter.writeTo(dst, message)) {
+                    // message got written, lets see if another message can be written
+                    message = null;
+                } else {
+                    // the message didn't get written completely, so we are done.
+                    return DIRTY;
+                }
+            }
+        } finally {
+            dst.flip();
+        }
     }
 }

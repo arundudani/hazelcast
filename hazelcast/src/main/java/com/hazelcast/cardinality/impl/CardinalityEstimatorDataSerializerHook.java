@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,9 +22,9 @@ import com.hazelcast.cardinality.impl.hyperloglog.impl.SparseHyperLogLogEncoder;
 import com.hazelcast.cardinality.impl.operations.AggregateBackupOperation;
 import com.hazelcast.cardinality.impl.operations.AggregateOperation;
 import com.hazelcast.cardinality.impl.operations.EstimateOperation;
+import com.hazelcast.cardinality.impl.operations.MergeBackupOperation;
 import com.hazelcast.cardinality.impl.operations.MergeOperation;
 import com.hazelcast.cardinality.impl.operations.ReplicationOperation;
-import com.hazelcast.cardinality.impl.operations.MergeBackupOperation;
 import com.hazelcast.internal.serialization.DataSerializerHook;
 import com.hazelcast.internal.serialization.impl.FactoryIdHelper;
 import com.hazelcast.nio.serialization.DataSerializableFactory;

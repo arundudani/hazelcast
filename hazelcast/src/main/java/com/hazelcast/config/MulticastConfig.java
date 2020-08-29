@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ package com.hazelcast.config;
 import java.util.HashSet;
 import java.util.Set;
 
-import static com.hazelcast.util.Preconditions.checkHasText;
-import static com.hazelcast.util.Preconditions.isNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkHasText;
+import static com.hazelcast.internal.util.Preconditions.isNotNull;
 
 /**
  * Contains the configuration for the multicast discovery mechanism.
@@ -31,12 +31,12 @@ import static com.hazelcast.util.Preconditions.isNotNull;
  * It depends on your environment if multicast is possible or allowed; you need to have a look at the
  * TCP/IP cluster: {@link TcpIpConfig}.
  */
-public class MulticastConfig {
+public class MulticastConfig implements TrustedInterfacesConfigurable<MulticastConfig> {
 
     /**
      * Whether the multicast discovery mechanism has been enabled
      */
-    public static final boolean DEFAULT_ENABLED = true;
+    public static final boolean DEFAULT_ENABLED = false;
     /**
      * Default group of multicast.
      */

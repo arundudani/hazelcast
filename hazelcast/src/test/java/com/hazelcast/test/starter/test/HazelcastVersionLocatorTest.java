@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,8 @@ package com.hazelcast.test.starter.test;
 import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
-import com.google.common.io.Files;
 import com.hazelcast.test.HazelcastParallelClassRunner;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.SlowTest;
 import com.hazelcast.test.starter.HazelcastVersionLocator;
 import org.junit.Rule;
@@ -31,36 +30,39 @@ import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
 import java.io.File;
-import java.io.IOException;
 
+import static com.google.common.io.Files.toByteArray;
+import static com.hazelcast.test.starter.HazelcastVersionLocator.HAZELCAST_EE_JAR_INDEX;
+import static com.hazelcast.test.starter.HazelcastVersionLocator.HAZELCAST_EE_TESTS_JAR_INDEX;
+import static com.hazelcast.test.starter.HazelcastVersionLocator.HAZELCAST_JAR_INDEX;
+import static com.hazelcast.test.starter.HazelcastVersionLocator.HAZELCAST_TESTS_JAR_INDEX;
 import static org.junit.Assert.assertEquals;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({SlowTest.class, ParallelTest.class})
+@Category({SlowTest.class, ParallelJVMTest.class})
 public class HazelcastVersionLocatorTest {
 
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
 
+    private HashFunction md5Hash = Hashing.md5();
+
     @Test
-    public void testDownloadVersion() throws IOException {
-        File[] files = HazelcastVersionLocator.locateVersion("3.6", folder.getRoot(), true);
-        HashFunction md5Hash = Hashing.md5();
+    public void testDownloadVersion() throws Exception {
+        File[] files = HazelcastVersionLocator.locateVersion("4.0", folder.getRoot(), true);
 
-        byte[] memberBytes = Files.toByteArray(files[0]);
+        assertHash(files[HAZELCAST_JAR_INDEX], "bc409b12b96ece6d05c3bd1e99b202bb", "OS");
+
+        assertHash(files[HAZELCAST_TESTS_JAR_INDEX], "220509ece9fc152525c91ba7c75ce600", "OS tests");
+
+        assertHash(files[HAZELCAST_EE_JAR_INDEX], "765816e628ca4ca57d5bd7387e761eaa", "EE");
+
+        assertHash(files[HAZELCAST_EE_TESTS_JAR_INDEX], "162bcb2412570845e6fd91ee61b54f94", "EE tests");
+    }
+
+    private void assertHash(File file, String expectedHash, String label) throws Exception {
+        byte[] memberBytes = toByteArray(file);
         HashCode memberHash = md5Hash.hashBytes(memberBytes);
-        assertEquals("89563f7dab02bd5f592082697c24d167", memberHash.toString());
-
-        byte[] clientBytes = Files.toByteArray(files[1]);
-        HashCode clientHash = md5Hash.hashBytes(clientBytes);
-        assertEquals("fd6022e35908b42d24fe10a9c9fdaad5", clientHash.toString());
-
-        byte[] eeMemberBytes = Files.toByteArray(files[2]);
-        HashCode eeMemberHash = md5Hash.hashBytes(eeMemberBytes);
-        assertEquals("c5718ba5c280339fff9b54ecb5e61549", eeMemberHash.toString());
-
-        byte[] eeClientBytes = Files.toByteArray(files[3]);
-        HashCode eeClientHash = md5Hash.hashBytes(eeClientBytes);
-        assertEquals("b1cf93ec4bb9bcda8809b81349f48cb3", eeClientHash.toString());
+        assertEquals("Expected hash of Hazelcast " + label + " JAR to be " + expectedHash, expectedHash, memberHash.toString());
     }
 }

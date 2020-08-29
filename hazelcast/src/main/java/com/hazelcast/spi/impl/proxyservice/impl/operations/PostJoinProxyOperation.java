@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,15 @@
 package com.hazelcast.spi.impl.proxyservice.impl.operations;
 
 import com.hazelcast.cache.CacheNotExistsException;
+import com.hazelcast.internal.util.UUIDSerializationUtil;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.spi.ExecutionService;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.replicatedmap.ReplicatedMapCantBeCreatedOnLiteMemberException;
+import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.SpiDataSerializerHook;
+import com.hazelcast.spi.impl.executionservice.ExecutionService;
+import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.spi.impl.proxyservice.impl.ProxyInfo;
 import com.hazelcast.spi.impl.proxyservice.impl.ProxyRegistry;
 import com.hazelcast.spi.impl.proxyservice.impl.ProxyServiceImpl;
@@ -31,6 +33,8 @@ import com.hazelcast.spi.impl.proxyservice.impl.ProxyServiceImpl;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+
+import static com.hazelcast.internal.util.EmptyStatement.ignore;
 
 public class PostJoinProxyOperation extends Operation implements IdentifiedDataSerializable {
 
@@ -73,11 +77,6 @@ public class PostJoinProxyOperation extends Operation implements IdentifiedDataS
     }
 
     @Override
-    public boolean returnsResponse() {
-        return false;
-    }
-
-    @Override
     protected void writeInternal(ObjectDataOutput out) throws IOException {
         super.writeInternal(out);
         int len = proxies != null ? proxies.size() : 0;
@@ -85,8 +84,8 @@ public class PostJoinProxyOperation extends Operation implements IdentifiedDataS
         if (len > 0) {
             for (ProxyInfo proxy : proxies) {
                 out.writeUTF(proxy.getServiceName());
-                out.writeObject(proxy.getObjectName());
-                // writing as object for backward-compatibility
+                out.writeUTF(proxy.getObjectName());
+                UUIDSerializationUtil.writeUUID(out, proxy.getSource());
             }
         }
     }
@@ -96,9 +95,9 @@ public class PostJoinProxyOperation extends Operation implements IdentifiedDataS
         super.readInternal(in);
         int len = in.readInt();
         if (len > 0) {
-            proxies = new ArrayList<ProxyInfo>(len);
+            proxies = new ArrayList<>(len);
             for (int i = 0; i < len; i++) {
-                ProxyInfo proxy = new ProxyInfo(in.readUTF(), (String) in.readObject());
+                ProxyInfo proxy = new ProxyInfo(in.readUTF(), in.readUTF(), UUIDSerializationUtil.readUUID(in));
                 proxies.add(proxy);
             }
         }
@@ -110,7 +109,7 @@ public class PostJoinProxyOperation extends Operation implements IdentifiedDataS
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return SpiDataSerializerHook.POST_JOIN_PROXY;
     }
 
@@ -126,13 +125,17 @@ public class PostJoinProxyOperation extends Operation implements IdentifiedDataS
         @Override
         public void run() {
             try {
-                registry.createProxy(proxyInfo.getObjectName(), false, true);
+                registry.createProxy(proxyInfo.getObjectName(), proxyInfo.getSource(), true, true);
             } catch (CacheNotExistsException e) {
-                // This can happen when cache destroy event is received
-                // after cache config is replicated during join (pre-join)
-                // but before cache proxy is created (post-join).
-                getLogger().fine("Could not create Cache[" + proxyInfo.getObjectName()
-                        + "]. It is already destroyed.", e);
+                // this can happen when a cache destroy event is received
+                // after the cache config is replicated during join (pre-join)
+                // but before the cache proxy is created (post-join)
+                getLogger().fine("Could not create Cache[" + proxyInfo.getObjectName() + "]. It is already destroyed.", e);
+            } catch (ReplicatedMapCantBeCreatedOnLiteMemberException e) {
+                // this happens when there is a lite member in the cluster
+                // and a data member creates a ReplicatedMap proxy
+                // (this is totally expected and doesn't need logging)
+                ignore(e);
             } catch (Exception e) {
                 logProxyCreationFailure(proxyInfo, e);
             }

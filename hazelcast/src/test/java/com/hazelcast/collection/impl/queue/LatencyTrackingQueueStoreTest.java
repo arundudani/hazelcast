@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@
 
 package com.hazelcast.collection.impl.queue;
 
+import com.hazelcast.collection.QueueStore;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.QueueStore;
 import com.hazelcast.internal.diagnostics.StoreLatencyPlugin;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestCollectionUtils;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Before;
 import org.junit.Test;
@@ -36,24 +36,25 @@ import java.util.Map;
 import java.util.Set;
 
 import static com.google.common.primitives.Longs.asList;
+import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class LatencyTrackingQueueStoreTest extends HazelcastTestSupport {
-    private static final String NAME = "somequeue";
 
-    private HazelcastInstance hz;
+    private static final String NAME = "someQueue";
+
     private StoreLatencyPlugin plugin;
     private QueueStore<String> delegate;
     private LatencyTrackingQueueStore<String> queueStore;
 
     @Before
     public void setup() {
-        hz = createHazelcastInstance();
+        HazelcastInstance hz = createHazelcastInstance();
         plugin = new StoreLatencyPlugin(getNodeEngineImpl(hz));
         delegate = mock(QueueStore.class);
         queueStore = new LatencyTrackingQueueStore<String>(delegate, plugin, NAME);
@@ -62,7 +63,7 @@ public class LatencyTrackingQueueStoreTest extends HazelcastTestSupport {
     @Test
     public void load() {
         Long key = 1L;
-        String value = "somevalue";
+        String value = "someValue";
 
         when(delegate.load(key)).thenReturn(value);
 

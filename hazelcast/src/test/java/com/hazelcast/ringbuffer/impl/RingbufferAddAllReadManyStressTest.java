@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,14 +21,12 @@ import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.RingbufferConfig;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.logging.Logger;
 import com.hazelcast.ringbuffer.ReadResultSet;
 import com.hazelcast.ringbuffer.Ringbuffer;
 import com.hazelcast.ringbuffer.StaleSequenceException;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestThread;
-import com.hazelcast.test.TimeConstants;
 import com.hazelcast.test.annotation.NightlyTest;
 import org.junit.After;
 import org.junit.Test;
@@ -36,15 +34,14 @@ import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.hazelcast.logging.Logger.getLogger;
 import static com.hazelcast.ringbuffer.OverflowPolicy.FAIL;
-import static com.hazelcast.spi.properties.GroupProperty.EVENT_THREAD_COUNT;
-import static com.hazelcast.spi.properties.GroupProperty.GENERIC_OPERATION_THREAD_COUNT;
-import static com.hazelcast.spi.properties.GroupProperty.PARTITION_COUNT;
-import static com.hazelcast.spi.properties.GroupProperty.PARTITION_OPERATION_THREAD_COUNT;
+import static com.hazelcast.test.TimeConstants.MINUTE;
 import static java.lang.Math.max;
 import static java.lang.System.currentTimeMillis;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -55,9 +52,11 @@ import static org.junit.Assert.assertEquals;
 @Category(NightlyTest.class)
 public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
 
-    private final ILogger logger = Logger.getLogger(RingbufferAddAllReadManyStressTest.class);
     private static final int MAX_BATCH = 100;
+
+    private final ILogger logger = getLogger(RingbufferAddAllReadManyStressTest.class);
     private final AtomicBoolean stop = new AtomicBoolean();
+
     private Ringbuffer<Long> ringbuffer;
 
     @After
@@ -67,8 +66,8 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
         }
     }
 
-    @Test(timeout = TimeConstants.MINUTE * 10)
-    public void whenNoTTL() throws Exception {
+    @Test(timeout = MINUTE * 10)
+    public void whenNoTTL() {
         RingbufferConfig ringbufferConfig = new RingbufferConfig("rb")
                 .setCapacity(20 * 1000 * 1000)
                 .setInMemoryFormat(InMemoryFormat.OBJECT)
@@ -76,24 +75,24 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
         test(ringbufferConfig);
     }
 
-    @Test(timeout = TimeConstants.MINUTE * 10)
-    public void whenTTLEnabled() throws Exception {
+    @Test(timeout = MINUTE * 10)
+    public void whenTTLEnabled() {
         RingbufferConfig ringbufferConfig = new RingbufferConfig("rb")
                 .setCapacity(200 * 1000)
                 .setTimeToLiveSeconds(2);
         test(ringbufferConfig);
     }
 
-    @Test(timeout = TimeConstants.MINUTE * 10)
-    public void whenLongTTLAndSmallBuffer() throws Exception {
+    @Test(timeout = MINUTE * 10)
+    public void whenLongTTLAndSmallBuffer() {
         RingbufferConfig ringbufferConfig = new RingbufferConfig("rb")
                 .setCapacity(1000)
                 .setTimeToLiveSeconds(30);
         test(ringbufferConfig);
     }
 
-    @Test(timeout = TimeConstants.MINUTE * 10)
-    public void whenShortTTLAndBigBuffer() throws Exception {
+    @Test(timeout = MINUTE * 10)
+    public void whenShortTTLAndBigBuffer() {
         RingbufferConfig ringbufferConfig = new RingbufferConfig("rb")
                 .setInMemoryFormat(InMemoryFormat.OBJECT)
                 .setCapacity(20 * 1000 * 1000)
@@ -101,13 +100,8 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
         test(ringbufferConfig);
     }
 
-    public void test(RingbufferConfig ringbufferConfig) throws Exception {
-        // make the test instances consume less resources
-        Config config = new Config()
-                .setProperty(PARTITION_COUNT.getName(), "10")
-                .setProperty(PARTITION_OPERATION_THREAD_COUNT.getName(), "2")
-                .setProperty(GENERIC_OPERATION_THREAD_COUNT.getName(), "2")
-                .setProperty(EVENT_THREAD_COUNT.getName(), "1");
+    public void test(RingbufferConfig ringbufferConfig) {
+        Config config = smallInstanceConfig();
 
         config.addRingBufferConfig(ringbufferConfig);
         HazelcastInstance[] instances = createHazelcastInstanceFactory(2).newInstances(config);
@@ -139,14 +133,15 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
     }
 
     class ProduceThread extends TestThread {
-        private final ILogger logger = Logger.getLogger(ProduceThread.class);
+
+        private final ILogger logger = getLogger(ProduceThread.class);
+        private final Random random = new Random();
+
+        private long lastLogMs = 0;
+
         private volatile long produced;
-        Random random = new Random();
 
-        long lastLogMs = 0;
-
-
-        public ProduceThread() {
+        ProduceThread() {
             super("ProduceThread");
         }
 
@@ -158,14 +153,15 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
         @Override
         public void doRun() throws Throwable {
             while (!stop.get()) {
-                LinkedList<Long> items = makeBatch();
+                List<Long> items = makeBatch();
                 addAll(items);
             }
 
             ringbuffer.add(Long.MIN_VALUE);
         }
 
-        private LinkedList<Long> makeBatch() {
+        @SuppressWarnings("NonAtomicOperationOnVolatileField")
+        private List<Long> makeBatch() {
             int count = max(1, random.nextInt(MAX_BATCH));
             LinkedList<Long> items = new LinkedList<Long>();
 
@@ -182,10 +178,10 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
             return items;
         }
 
-        private void addAll(LinkedList<Long> items) throws InterruptedException, ExecutionException {
+        private void addAll(List<Long> items) throws Exception {
             long sleepMs = 100;
             for (; ; ) {
-                long result = ringbuffer.addAllAsync(items, FAIL).get();
+                long result = ringbuffer.addAllAsync(items, FAIL).toCompletableFuture().get();
                 if (result != -1) {
                     break;
                 }
@@ -200,11 +196,15 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
     }
 
     class ConsumeThread extends TestThread {
-        private final ILogger logger = Logger.getLogger(ConsumeThread.class);
-        volatile long seq;
-        long lastLogMs = 0;
 
-        public ConsumeThread(int id) {
+        private final ILogger logger = getLogger(ConsumeThread.class);
+        private final Random random = new Random();
+
+        private long lastLogMs = 0;
+
+        private volatile long seq;
+
+        ConsumeThread(int id) {
             super("ConsumeThread-" + id);
         }
 
@@ -214,17 +214,16 @@ public class RingbufferAddAllReadManyStressTest extends HazelcastTestSupport {
         }
 
         @Override
+        @SuppressWarnings("NonAtomicOperationOnVolatileField")
         public void doRun() throws Throwable {
             seq = ringbuffer.headSequence();
-
-            Random random = new Random();
 
             for (; ; ) {
                 int max = max(1, random.nextInt(MAX_BATCH));
                 ReadResultSet<Long> result = null;
                 while (result == null) {
                     try {
-                        result = ringbuffer.readManyAsync(seq, 1, max, null).get();
+                        result = ringbuffer.readManyAsync(seq, 1, max, null).toCompletableFuture().get();
                     } catch (ExecutionException e) {
                         if (e.getCause() instanceof StaleSequenceException) {
                             // this consumer is used in a stress test and can fall behind the producer if it gets delayed

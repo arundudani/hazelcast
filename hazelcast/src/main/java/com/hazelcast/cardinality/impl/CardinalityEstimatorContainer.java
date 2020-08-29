@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,14 +21,15 @@ import com.hazelcast.cardinality.impl.hyperloglog.impl.HyperLogLogImpl;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.spi.merge.MergingEntryHolder;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
+import com.hazelcast.spi.merge.SplitBrainMergeTypes.CardinalityEstimatorMergeTypes;
+import com.hazelcast.internal.serialization.SerializationService;
 
 import java.io.IOException;
 
 import static com.hazelcast.config.CardinalityEstimatorConfig.DEFAULT_ASYNC_BACKUP_COUNT;
 import static com.hazelcast.config.CardinalityEstimatorConfig.DEFAULT_SYNC_BACKUP_COUNT;
-import static com.hazelcast.spi.impl.merge.MergingHolders.createMergeHolder;
+import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingEntry;
 
 public class CardinalityEstimatorContainer
         implements IdentifiedDataSerializable {
@@ -69,16 +70,23 @@ public class CardinalityEstimatorContainer
     }
 
     /**
-     * Merges the given {@link MergingEntryHolder} via the given {@link SplitBrainMergePolicy}.
+     * Merges the given {@link CardinalityEstimatorMergeTypes} via the given {@link SplitBrainMergePolicy}.
      *
-     * @param mergingEntry the {@link MergingEntryHolder} instance to merge
-     * @param mergePolicy  the {@link SplitBrainMergePolicy} instance to apply
+     * @param mergingEntry         the {@link CardinalityEstimatorMergeTypes} instance to merge
+     * @param mergePolicy          the {@link SplitBrainMergePolicy} instance to apply
+     * @param serializationService the {@link SerializationService} to inject dependencies
      * @return the used {@link HyperLogLog} if merge is applied, otherwise {@code null}
      */
-    public HyperLogLog merge(MergingEntryHolder<String, HyperLogLog> mergingEntry, SplitBrainMergePolicy mergePolicy) {
+    public HyperLogLog merge(CardinalityEstimatorMergeTypes mergingEntry,
+                             SplitBrainMergePolicy<HyperLogLog, CardinalityEstimatorMergeTypes, HyperLogLog> mergePolicy,
+                             SerializationService serializationService) {
+        mergingEntry = (CardinalityEstimatorMergeTypes) serializationService.getManagedContext().initialize(mergingEntry);
+        mergePolicy = (SplitBrainMergePolicy<HyperLogLog, CardinalityEstimatorMergeTypes, HyperLogLog>)
+            serializationService.getManagedContext().initialize(mergePolicy);
+
         String name = mergingEntry.getKey();
         if (hll.estimate() != 0) {
-            MergingEntryHolder<String, HyperLogLog> existingEntry = createMergeHolder(name, hll);
+            CardinalityEstimatorMergeTypes existingEntry = createMergingEntry(serializationService, name, hll);
             HyperLogLog newValue = mergePolicy.merge(mergingEntry, existingEntry);
             if (newValue != null && !newValue.equals(hll)) {
                 setValue(newValue);
@@ -118,7 +126,7 @@ public class CardinalityEstimatorContainer
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CardinalityEstimatorDataSerializerHook.CARDINALITY_EST_CONTAINER;
     }
 

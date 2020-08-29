@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,42 +16,58 @@
 
 package com.hazelcast.map.impl;
 
+import com.hazelcast.config.InMemoryFormat;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.map.impl.operation.EntryOperator;
+import com.hazelcast.map.ExtendedMapEntry;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 import com.hazelcast.query.impl.CachedQueryEntry;
+import com.hazelcast.query.impl.Metadata;
 import com.hazelcast.query.impl.getters.Extractors;
+
+import static com.hazelcast.map.impl.record.Record.UNSET;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 /**
- * A {@link java.util.Map.Entry Map.Entry} implementation which serializes/de-serializes key and value objects on demand.
- * It is beneficial when you need to prevent unneeded serialization/de-serialization
- * when creating a {@link java.util.Map.Entry Map.Entry}. Mainly targeted to supply a lazy entry to
- * {@link com.hazelcast.map.EntryProcessor#process(Map.Entry)} and
- * {@link com.hazelcast.map.EntryBackupProcessor#processBackup(Map.Entry)}} methods.
- * <p/>
- * <STRONG>Note that this implementation is not synchronized and is not thread-safe.</STRONG>
- * <p/>
- * LazyMapEntry itself is serializable as long as the object representations of both key and value are serializable.
- * After serialization objects are resolved using injected SerializationService. De-serialized LazyMapEntry
- * does contain object representation only Data representations and SerializationService is set to null. In other
+ * A {@link java.util.Map.Entry Map.Entry} implementation
+ * which serializes/de-serializes key and value objects on
+ * demand. It is beneficial when you need to prevent unneeded
+ * serialization/de-serialization when creating a {@link
+ * java.util.Map.Entry Map.Entry}. Mainly targeted to supply a lazy entry
+ * to {@link com.hazelcast.map.EntryProcessor#process(Map.Entry)} method.
+ * <p>
+ * <STRONG>
+ * Note that this implementation is not
+ * synchronized and is not thread-safe.
+ * </STRONG>
+ * <p>
+ * LazyMapEntry itself is serializable as long as the object
+ * representations of both key and value are serializable.
+ * After serialization objects are resolved using injected
+ * SerializationService. De-serialized LazyMapEntry does
+ * contain object representation only Data representations
+ * and SerializationService is set to null. In other
  * words: It's as usable just as a regular Map.Entry.
  *
  * @param <K> key
  * @param <V> value
- * @see EntryOperator#createMapEntry(Data, Object, Boolean)
  */
-public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V> implements Serializable, IdentifiedDataSerializable {
+public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V>
+        implements Serializable, IdentifiedDataSerializable, ExtendedMapEntry<K, V> {
 
     private static final long serialVersionUID = 0L;
 
     private transient boolean modified;
+    private transient Metadata metadata;
+
+    private transient long newTtl = UNSET;
 
     public LazyMapEntry() {
     }
@@ -65,12 +81,36 @@ public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V> implements Serial
     }
 
     @Override
+    public LazyMapEntry init(InternalSerializationService serializationService, Data key, Object value, Extractors extractors) {
+        super.init(serializationService, key, value, extractors);
+        modified = false;
+        metadata = null;
+        return this;
+    }
+
+    public void setValueByInMemoryFormat(InMemoryFormat inMemoryFormat, Object value) {
+        if (inMemoryFormat == InMemoryFormat.OBJECT) {
+            valueObject = (V) value;
+            valueData = null;
+        } else {
+            valueData = (Data) value;
+            valueObject = null;
+        }
+    }
+
+    @Override
     public V setValue(V value) {
         modified = true;
         V oldValue = getValue();
         this.valueObject = value;
         this.valueData = null;
         return oldValue;
+    }
+
+    @Override
+    public V setValue(V value, long ttl, TimeUnit ttlUnit) {
+        newTtl = ttlUnit.toMillis(ttl);
+        return setValue(value);
     }
 
     /**
@@ -95,17 +135,18 @@ public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V> implements Serial
         return modified;
     }
 
+    public long getNewTtl() {
+        return newTtl;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof Map.Entry)) {
             return false;
         }
         Map.Entry<?, ?> e = (Map.Entry<?, ?>) o;
-        return eq(getKey(), e.getKey()) && eq(getValue(), e.getValue());
-    }
-
-    private static boolean eq(Object o1, Object o2) {
-        return o1 == null ? o2 == null : o1.equals(o2);
+        return Objects.equals(getKey(), e.getKey())
+                && Objects.equals(getValue(), e.getValue());
     }
 
     @Override
@@ -150,7 +191,16 @@ public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V> implements Serial
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MapDataSerializerHook.LAZY_MAP_ENTRY;
     }
+
+    public Metadata getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Metadata metadata) {
+        this.metadata = metadata;
+    }
+
 }

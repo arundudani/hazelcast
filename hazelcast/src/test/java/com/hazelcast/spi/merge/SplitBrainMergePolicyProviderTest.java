@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,9 @@
 package com.hazelcast.spi.merge;
 
 import com.hazelcast.config.InvalidConfigurationException;
-import com.hazelcast.spi.SplitBrainMergePolicy;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.hamcrest.core.IsInstanceOf;
 import org.junit.Before;
@@ -30,11 +29,16 @@ import org.junit.experimental.categories.Category;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
+import java.util.Set;
+
+import static com.hazelcast.test.Accessors.getNode;
+import static com.hazelcast.test.ReflectionsHelper.REFLECTIONS;
+import static java.lang.reflect.Modifier.isAbstract;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class SplitBrainMergePolicyProviderTest extends HazelcastTestSupport {
 
     private SplitBrainMergePolicyProvider mergePolicyProvider;
@@ -48,68 +52,29 @@ public class SplitBrainMergePolicyProviderTest extends HazelcastTestSupport {
     }
 
     @Test
-    public void getMergePolicy_NotExistingMergePolicy() {
+    public void getMergePolicy_withNotExistingMergePolicy() {
         expected.expect(InvalidConfigurationException.class);
         expected.expectCause(IsInstanceOf.any(ClassNotFoundException.class));
         mergePolicyProvider.getMergePolicy("No such policy!");
     }
 
     @Test
-    public void getMergePolicy_NullPolicy() {
+    public void getMergePolicy_withNullPolicy() {
         expected.expect(InvalidConfigurationException.class);
         mergePolicyProvider.getMergePolicy(null);
     }
 
     @Test
-    public void getMergePolicy_HigherHitsMapCachePolicy_byFullyQualifiedName() {
-        assertMergePolicyCorrectlyInitialised(HigherHitsMergePolicy.class.getName(), HigherHitsMergePolicy.class);
+    public void getMergePolicy_withAllImplementations() {
+        Set<Class<? extends SplitBrainMergePolicy>> mergePolicyClasses = REFLECTIONS.getSubTypesOf(SplitBrainMergePolicy.class);
+        for (Class<? extends SplitBrainMergePolicy> mergePolicyClass : mergePolicyClasses) {
+            if (isAbstract(mergePolicyClass.getModifiers())) {
+                continue;
+            }
+            assertMergePolicyCorrectlyInitialised(mergePolicyClass.getSimpleName(), mergePolicyClass);
+            assertMergePolicyCorrectlyInitialised(mergePolicyClass.getName(), mergePolicyClass);
+        }
     }
-
-    @Test
-    public void getMergePolicy_HigherHitsMapCachePolicy_bySimpleName() {
-        assertMergePolicyCorrectlyInitialised(HigherHitsMergePolicy.class.getSimpleName(), HigherHitsMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_LatestAccessCacheMergePolicy_byFullyQualifiedName() {
-        assertMergePolicyCorrectlyInitialised(LatestAccessMergePolicy.class.getName(), LatestAccessMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_LatestAccessCacheMergePolicy_bySimpleName() {
-        assertMergePolicyCorrectlyInitialised(LatestAccessMergePolicy.class.getSimpleName(), LatestAccessMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_LatestUpdateMergePolicy_byFullyQualifiedName() {
-        assertMergePolicyCorrectlyInitialised(LatestUpdateMergePolicy.class.getName(), LatestUpdateMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_LatestUpdateMergePolicy_bySimpleName() {
-        assertMergePolicyCorrectlyInitialised(LatestUpdateMergePolicy.class.getSimpleName(), LatestUpdateMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_PassThroughCachePolicy_byFullyQualifiedName() {
-        assertMergePolicyCorrectlyInitialised(PassThroughMergePolicy.class.getName(), PassThroughMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_PassThroughCachePolicy_bySimpleName() {
-        assertMergePolicyCorrectlyInitialised(PassThroughMergePolicy.class.getSimpleName(), PassThroughMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_PutIfAbsentCacheMergePolicy_byFullyQualifiedName() {
-        assertMergePolicyCorrectlyInitialised(PutIfAbsentMergePolicy.class.getName(), PutIfAbsentMergePolicy.class);
-    }
-
-    @Test
-    public void getMergePolicy_PutIfAbsentCacheMergePolicy_bySimpleName() {
-        assertMergePolicyCorrectlyInitialised(PutIfAbsentMergePolicy.class.getSimpleName(), PutIfAbsentMergePolicy.class);
-    }
-
     private void assertMergePolicyCorrectlyInitialised(String mergePolicyName,
                                                        Class<? extends SplitBrainMergePolicy> expectedMergePolicyClass) {
         SplitBrainMergePolicy mergePolicy = mergePolicyProvider.getMergePolicy(mergePolicyName);

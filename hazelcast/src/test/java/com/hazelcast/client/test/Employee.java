@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,9 @@ import com.hazelcast.nio.serialization.PortableWriter;
 
 import java.io.IOException;
 
-class Employee implements Portable {
+public class Employee implements Portable {
 
+    public static final int CLASS_ID = 2;
     private String name;
     private int age;
 
@@ -45,14 +46,14 @@ class Employee implements Portable {
     String str = "Hello world";
     String utfStr = "イロハニホヘト チリヌルヲ ワカヨタレソ ツネナラム";
 
-    byte byteArray[] = {50, 100, (byte) 150, (byte) 200};
-    char charArray[] = {'c', 'h', 'a', 'r'};
-    boolean boolArray[] = {true, false, false, true};
-    short shortArray[] = {3, 4, 5};
-    int integerArray[] = {9, 8, 7, 6};
-    long longArray[] = {0, 1, 5, 7, 9, 11};
-    float floatArray[] = {0.6543f, -3.56f, 45.67f};
-    double doubleArray[] = {456.456, 789.789, 321.321};
+    byte[] byteArray = {50, 100, (byte) 150, (byte) 200};
+    char[] charArray = {'c', 'h', 'a', 'r'};
+    boolean[] boolArray = {true, false, false, true};
+    short[] shortArray = {3, 4, 5};
+    int[] integerArray = {9, 8, 7, 6};
+    long[] longArray = {0, 1, 5, 7, 9, 11};
+    float[] floatArray = {0.6543f, -3.56f, 45.67f};
+    double[] doubleArray = {456.456, 789.789, 321.321};
 
     public Employee() {
     }
@@ -63,11 +64,11 @@ class Employee implements Portable {
     }
 
     public int getFactoryId() {
-        return 666;
+        return PortableFactory.FACTORY_ID;
     }
 
     public int getClassId() {
-        return 2;
+        return CLASS_ID;
     }
 
     public void writePortable(PortableWriter writer) throws IOException {

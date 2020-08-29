@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 
 package com.hazelcast.multimap.impl.operations;
 
-import com.hazelcast.core.EntryEventType;
 import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
 import com.hazelcast.multimap.impl.MultiMapMergeContainer;
@@ -24,11 +23,11 @@ import com.hazelcast.multimap.impl.MultiMapRecord;
 import com.hazelcast.multimap.impl.MultiMapValue;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.BackupAwareOperation;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.SplitBrainMergePolicy;
-import com.hazelcast.spi.merge.MergingEntryHolder;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupAwareOperation;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
+import com.hazelcast.spi.merge.SplitBrainMergeTypes.MultiMapMergeTypes;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,35 +35,36 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-import static com.hazelcast.spi.impl.merge.MergingHolders.createMergeHolder;
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
 
 /**
- * Contains multiple merge entries for split-brain healing with a {@link SplitBrainMergePolicy}.
+ * Merges multiple {@link MultiMapMergeContainer} for split-brain healing with a {@link SplitBrainMergePolicy}.
  *
  * @since 3.10
  */
-public class MergeOperation extends MultiMapOperation implements BackupAwareOperation {
+public class MergeOperation extends AbstractMultiMapOperation implements BackupAwareOperation {
 
-    private List<MultiMapMergeContainer> mergingData;
-    private SplitBrainMergePolicy mergePolicy;
+    private List<MultiMapMergeContainer> mergeContainers;
+    private SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes<Object, Object>, Collection<Object>> mergePolicy;
 
     private transient Map<Data, Collection<MultiMapRecord>> resultMap;
 
     public MergeOperation() {
     }
 
-    public MergeOperation(String name, List<MultiMapMergeContainer> mergingData, SplitBrainMergePolicy mergePolicy) {
+    public MergeOperation(String name, List<MultiMapMergeContainer> mergeContainers,
+                          SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes<Object, Object>,
+                                  Collection<Object>> mergePolicy) {
         super(name);
-        this.mergingData = mergingData;
+        this.mergeContainers = mergeContainers;
         this.mergePolicy = mergePolicy;
     }
 
     @Override
     public void run() throws Exception {
-        MultiMapContainer container = getOrCreateContainer();
-        resultMap = createHashMap(mergingData.size());
-        for (MultiMapMergeContainer mergeContainer : mergingData) {
+        MultiMapContainer container = getOrCreateContainerWithoutAccess();
+        resultMap = createHashMap(mergeContainers.size());
+        for (MultiMapMergeContainer mergeContainer : mergeContainers) {
             Data key = mergeContainer.getKey();
             if (!container.canAcquireLock(key, getCallerUuid(), -1)) {
                 Object valueKey = getNodeEngine().getSerializationService().toObject(key);
@@ -72,19 +72,12 @@ public class MergeOperation extends MultiMapOperation implements BackupAwareOper
                 continue;
             }
 
-            MergingEntryHolder<Data, MultiMapMergeContainer> dataHolder = createMergeHolder(key, mergeContainer);
-            MultiMapValue result = container.merge(dataHolder, mergePolicy);
+            MultiMapValue result = container.merge(mergeContainer, mergePolicy);
             if (result != null) {
                 resultMap.put(key, result.getCollection(false));
-                publishEvent(EntryEventType.MERGED, key, result, null);
             }
         }
         response = !resultMap.isEmpty();
-    }
-
-    @Override
-    public Operation getBackupOperation() {
-        return new MergeBackupOperation(name, resultMap);
     }
 
     @Override
@@ -93,10 +86,15 @@ public class MergeOperation extends MultiMapOperation implements BackupAwareOper
     }
 
     @Override
+    public Operation getBackupOperation() {
+        return new MergeBackupOperation(name, resultMap);
+    }
+
+    @Override
     protected void writeInternal(ObjectDataOutput out) throws IOException {
         super.writeInternal(out);
-        out.writeInt(mergingData.size());
-        for (MultiMapMergeContainer container : mergingData) {
+        out.writeInt(mergeContainers.size());
+        for (MultiMapMergeContainer container : mergeContainers) {
             out.writeObject(container);
         }
         out.writeObject(mergePolicy);
@@ -106,16 +104,16 @@ public class MergeOperation extends MultiMapOperation implements BackupAwareOper
     protected void readInternal(ObjectDataInput in) throws IOException {
         super.readInternal(in);
         int size = in.readInt();
-        mergingData = new ArrayList<MultiMapMergeContainer>(size);
+        mergeContainers = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             MultiMapMergeContainer container = in.readObject();
-            mergingData.add(container);
+            mergeContainers.add(container);
         }
         mergePolicy = in.readObject();
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.MERGE_OPERATION;
     }
 }

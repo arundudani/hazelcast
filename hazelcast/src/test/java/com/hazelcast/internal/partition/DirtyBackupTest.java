@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,17 @@
 
 package com.hazelcast.internal.partition;
 
+import com.hazelcast.cluster.Address;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.instance.Node;
+import com.hazelcast.instance.EndpointQualifier;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.server.FirewallingServer;
+import com.hazelcast.internal.server.OperationPacketFilter;
+import com.hazelcast.internal.server.PacketFilter;
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.nio.Address;
-import com.hazelcast.nio.tcp.FirewallingConnectionManager;
-import com.hazelcast.nio.tcp.OperationPacketFilter;
-import com.hazelcast.nio.tcp.PacketFilter;
 import com.hazelcast.spi.impl.SpiDataSerializerHook;
-import com.hazelcast.test.HazelcastParametersRunnerFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -36,11 +37,12 @@ import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 
 import java.util.Collection;
 
+import static com.hazelcast.test.Accessors.getNode;
 import static java.util.Arrays.asList;
 
 @RunWith(Parameterized.class)
-@UseParametersRunnerFactory(HazelcastParametersRunnerFactory.class)
-@Category({QuickTest.class, ParallelTest.class})
+@UseParametersRunnerFactory(HazelcastParallelParametersRunnerFactory.class)
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class DirtyBackupTest extends PartitionCorrectnessTestSupport {
 
     @Parameters(name = "backups:{0},nodes:{1}")
@@ -81,8 +83,10 @@ public class DirtyBackupTest extends PartitionCorrectnessTestSupport {
 
     private static void setBackupPacketReorderFilter(HazelcastInstance instance) {
         Node node = getNode(instance);
-        FirewallingConnectionManager cm = (FirewallingConnectionManager) node.getConnectionManager();
-        cm.setDelayingPacketFilter(new BackupPacketReorderFilter(node.getSerializationService()), 100, 1000);
+        FirewallingServer.FirewallingServerConnectionManager cm = (FirewallingServer.FirewallingServerConnectionManager)
+                node.getServer().getConnectionManager(EndpointQualifier.MEMBER);
+        cm.setPacketFilter(new BackupPacketReorderFilter(node.getSerializationService()));
+        cm.setDelayMillis(100, 1000);
     }
 
     private static class BackupPacketReorderFilter extends OperationPacketFilter implements PacketFilter {
@@ -92,9 +96,9 @@ public class DirtyBackupTest extends PartitionCorrectnessTestSupport {
         }
 
         @Override
-        protected boolean allowOperation(Address enpoint, int factory, int type) {
+        protected Action filterOperation(Address endpoint, int factory, int type) {
             boolean isBackup = factory == SpiDataSerializerHook.F_ID && type == SpiDataSerializerHook.BACKUP;
-            return !isBackup;
+            return isBackup ? Action.DELAY : Action.ALLOW;
         }
     }
 }

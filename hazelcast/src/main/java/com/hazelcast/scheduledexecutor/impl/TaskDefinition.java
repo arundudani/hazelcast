@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package com.hazelcast.scheduledexecutor.impl;
 
+import com.hazelcast.internal.cluster.Versions;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
@@ -58,25 +59,29 @@ public class TaskDefinition<V>
     private long initialDelay;
     private long period;
     private TimeUnit unit;
+    private boolean autoDisposable;
 
     public TaskDefinition() {
     }
 
-    public TaskDefinition(Type type, String name, Callable<V> command, long delay, TimeUnit unit) {
+    public TaskDefinition(Type type, String name, Callable<V> command, long delay, TimeUnit unit, boolean autoDisposable) {
         this.type = type;
         this.name = name;
         this.command = command;
         this.initialDelay = delay;
         this.unit = unit;
+        this.autoDisposable = autoDisposable;
     }
 
-    public TaskDefinition(Type type, String name, Callable<V> command, long initialDelay, long period, TimeUnit unit) {
+    public TaskDefinition(Type type, String name, Callable<V> command, long initialDelay, long period,
+                          TimeUnit unit, boolean autoDisposable) {
         this.type = type;
         this.name = name;
         this.command = command;
         this.initialDelay = initialDelay;
         this.period = period;
         this.unit = unit;
+        this.autoDisposable = autoDisposable;
     }
 
     public Type getType() {
@@ -103,13 +108,17 @@ public class TaskDefinition<V>
         return unit;
     }
 
+    public boolean isAutoDisposable() {
+        return autoDisposable;
+    }
+
     @Override
     public int getFactoryId() {
         return ScheduledExecutorDataSerializerHook.F_ID;
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ScheduledExecutorDataSerializerHook.RUNNABLE_DEFINITION;
     }
 
@@ -122,6 +131,9 @@ public class TaskDefinition<V>
         out.writeLong(initialDelay);
         out.writeLong(period);
         out.writeUTF(unit.name());
+        if (out.getVersion().isGreaterOrEqual(Versions.V4_1)) {
+            out.writeBoolean(autoDisposable);
+        }
     }
 
     @Override
@@ -133,6 +145,9 @@ public class TaskDefinition<V>
         initialDelay = in.readLong();
         period = in.readLong();
         unit = TimeUnit.valueOf(in.readUTF());
+        if (in.getVersion().isGreaterOrEqual(Versions.V4_1)) {
+            autoDisposable = in.readBoolean();
+        }
     }
 
     @Override
@@ -145,12 +160,12 @@ public class TaskDefinition<V>
         }
         TaskDefinition<?> that = (TaskDefinition<?>) o;
         return initialDelay == that.initialDelay && period == that.period && type == that.type && name.equals(that.name)
-                && unit == that.unit;
+                && unit == that.unit && autoDisposable == that.autoDisposable;
     }
 
     @Override
     public int hashCode() {
-        return Arrays.hashCode(new Object[]{type, name, initialDelay, period, unit});
+        return Arrays.hashCode(new Object[]{type, name, initialDelay, period, unit, autoDisposable});
     }
 
     @Override
@@ -162,6 +177,7 @@ public class TaskDefinition<V>
                 + ", initialDelay=" + initialDelay
                 + ", period=" + period
                 + ", unit=" + unit
+                + ", autoDisposable=" + autoDisposable
                 + '}';
     }
 }

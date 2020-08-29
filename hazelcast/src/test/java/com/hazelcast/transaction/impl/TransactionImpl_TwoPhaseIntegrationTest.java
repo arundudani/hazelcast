@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.hazelcast.transaction.impl;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.internal.util.UuidUtil;
 import com.hazelcast.spi.impl.NodeEngineImpl;
 import com.hazelcast.test.AssertTask;
 import com.hazelcast.test.HazelcastParallelClassRunner;
@@ -26,12 +27,14 @@ import com.hazelcast.test.annotation.QuickTest;
 import com.hazelcast.transaction.TransactionException;
 import com.hazelcast.transaction.TransactionOptions;
 import com.hazelcast.transaction.impl.TransactionManagerServiceImpl.TxBackupLog;
-import com.hazelcast.util.UuidUtil;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.util.UUID;
+
+import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static com.hazelcast.transaction.TransactionOptions.TransactionType.TWO_PHASE;
 import static com.hazelcast.transaction.impl.Transaction.State.COMMITTED;
 import static com.hazelcast.transaction.impl.Transaction.State.COMMITTING;
@@ -53,7 +56,7 @@ public class TransactionImpl_TwoPhaseIntegrationTest extends HazelcastTestSuppor
     private TransactionManagerServiceImpl localTxService;
     private TransactionManagerServiceImpl remoteTxService;
     private NodeEngineImpl localNodeEngine;
-    private String txOwner;
+    private UUID txOwner;
 
     @Before
     public void setup() {
@@ -61,7 +64,7 @@ public class TransactionImpl_TwoPhaseIntegrationTest extends HazelcastTestSuppor
         localNodeEngine = getNodeEngineImpl(cluster[0]);
         localTxService = getTransactionManagerService(cluster[0]);
         remoteTxService = getTransactionManagerService(cluster[1]);
-        txOwner = UuidUtil.newUnsecureUuidString();
+        txOwner = UuidUtil.newUnsecureUUID();
     }
 
     private void assertPrepared(TransactionImpl tx) {
@@ -313,7 +316,7 @@ public class TransactionImpl_TwoPhaseIntegrationTest extends HazelcastTestSuppor
 
     @Test
     public void prepare_whenMultipleItemsAndDurabilityOne_thenRemoveBackupLog() {
-        final String txOwner = localNodeEngine.getLocalMember().getUuid();
+        final UUID txOwner = localNodeEngine.getLocalMember().getUuid();
         TransactionOptions options = new TransactionOptions().setTransactionType(TWO_PHASE).setDurability(1);
         final TransactionImpl tx = new TransactionImpl(localTxService, localNodeEngine, options, txOwner);
         tx.begin();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,72 +17,40 @@
 package com.hazelcast.map.impl.operation;
 
 import com.hazelcast.core.EntryEventType;
-import com.hazelcast.core.EntryView;
-import com.hazelcast.map.impl.EntryViews;
-import com.hazelcast.map.impl.event.MapEventPublisher;
 import com.hazelcast.map.impl.record.Record;
-import com.hazelcast.map.impl.record.RecordInfo;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.BackupAwareOperation;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupAwareOperation;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
-import static com.hazelcast.map.impl.record.Records.buildRecordInfo;
-import static com.hazelcast.map.impl.recordstore.RecordStore.DEFAULT_TTL;
+public abstract class BasePutOperation
+        extends LockAwareOperation implements BackupAwareOperation {
 
-public abstract class BasePutOperation extends LockAwareOperation implements BackupAwareOperation {
-
-    protected transient Data dataOldValue;
-    protected transient Data dataMergingValue;
+    protected transient Object oldValue;
     protected transient EntryEventType eventType;
-    protected transient boolean putTransient;
 
     public BasePutOperation(String name, Data dataKey, Data value) {
-        super(name, dataKey, value, DEFAULT_TTL);
-    }
-
-    public BasePutOperation(String name, Data dataKey, Data value, long ttl) {
-        super(name, dataKey, value, ttl);
+        super(name, dataKey, value);
     }
 
     public BasePutOperation() {
     }
 
     @Override
-    public void afterRun() {
-        mapServiceContext.interceptAfterPut(name, dataValue);
-        Object value = isPostProcessing(recordStore) ? recordStore.getRecord(dataKey).getValue() : dataValue;
+    protected void afterRunInternal() {
+        Object value = isPostProcessing(recordStore)
+                ? recordStore.getRecord(dataKey).getValue() : dataValue;
+        mapServiceContext.interceptAfterPut(mapContainer.getInterceptorRegistry(), dataValue);
         mapEventPublisher.publishEvent(getCallerAddress(), name, getEventType(),
-                dataKey, dataOldValue, value, dataMergingValue);
+                dataKey, oldValue, value);
         invalidateNearCache(dataKey);
-        publishWANReplicationEvent(mapEventPublisher, value);
+        publishWanUpdate(dataKey, value);
         evict(dataKey);
-    }
-
-    private void publishWANReplicationEvent(MapEventPublisher mapEventPublisher, Object value) {
-        if (!mapContainer.isWanReplicationEnabled() || !canThisOpGenerateWANEvent()) {
-            return;
-        }
-
-        Record record = recordStore.getRecord(dataKey);
-        if (record == null) {
-            return;
-        }
-        final Data valueConvertedData = mapServiceContext.toData(value);
-        final EntryView entryView = EntryViews.createSimpleEntryView(dataKey, valueConvertedData, record);
-        mapEventPublisher.publishWanReplicationUpdate(name, entryView);
-    }
-
-    /**
-     * @return {@code true} if this operation can generate WAN event, otherwise return {@code false}
-     * to indicate WAN event generation is not allowed for this operation
-     */
-    protected boolean canThisOpGenerateWANEvent() {
-        return true;
     }
 
     private EntryEventType getEventType() {
         if (eventType == null) {
-            eventType = dataOldValue == null ? EntryEventType.ADDED : EntryEventType.UPDATED;
+            eventType = oldValue == null
+                    ? EntryEventType.ADDED : EntryEventType.UPDATED;
         }
         return eventType;
     }
@@ -95,12 +63,13 @@ public abstract class BasePutOperation extends LockAwareOperation implements Bac
 
     @Override
     public Operation getBackupOperation() {
-        final Record record = recordStore.getRecord(dataKey);
-        final RecordInfo replicationInfo = buildRecordInfo(record);
-        if (isPostProcessing(recordStore)) {
-            dataValue = mapServiceContext.toData(record.getValue());
-        }
-        return new PutBackupOperation(name, dataKey, dataValue, replicationInfo, putTransient);
+        Record record = recordStore.getRecord(dataKey);
+        dataValue = getValueOrPostProcessedValue(record, dataValue);
+        return newBackupOperation(dataKey, record, dataValue);
+    }
+
+    protected PutBackupOperation newBackupOperation(Data dataKey, Record record, Data dataValue) {
+        return new PutBackupOperation(name, dataKey, record, dataValue);
     }
 
     @Override

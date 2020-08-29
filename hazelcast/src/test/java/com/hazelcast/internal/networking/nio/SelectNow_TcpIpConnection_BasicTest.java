@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package com.hazelcast.internal.networking.nio;
 
-import com.hazelcast.nio.tcp.TcpIpConnection_AbstractBasicTest;
+import com.hazelcast.internal.server.tcp.TcpServerConnection_AbstractBasicTest;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Before;
@@ -25,11 +25,11 @@ import org.junit.runner.RunWith;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(QuickTest.class)
-public class SelectNow_TcpIpConnection_BasicTest extends TcpIpConnection_AbstractBasicTest {
+public class SelectNow_TcpIpConnection_BasicTest extends TcpServerConnection_AbstractBasicTest {
 
     @Before
     public void setup() throws Exception {
-        eventLoopGroupFactory = new SelectNow_NioEventLoopGroupFactory();
+        networkingFactory = new SelectNow_NioNetworkingFactory();
         super.setup();
     }
 }
